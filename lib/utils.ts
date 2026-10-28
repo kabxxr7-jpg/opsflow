@@ -1,4 +1,12 @@
 export { cn } from "cn";
+import type { JobStatus } from "@prisma/client";
+
+export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
+  SCHEDULED: "Scheduled",
+  IN_PROGRESS: "In progress",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+};
 
 // `toLocaleDateString()`/`toLocaleString()` with no explicit locale use the runtime's locale,
 // which differs between the Node server (initial render) and the browser (hydration) whenever

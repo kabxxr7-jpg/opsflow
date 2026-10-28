@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, JOB_STATUS_LABEL } from "@/lib/utils";
 import { WebhookFormDialog } from "@/components/webhook-form-dialog";
 import { WebhookRowActions } from "@/components/webhook-row-actions";
 
@@ -17,7 +17,7 @@ export default async function SettingsPage() {
     <div className="space-y-6 animate-fade-up">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight">Settings</h1>
           <p className="text-sm text-muted-foreground">
             Outbound webhook configuration, HMAC signing, and delivery history.
           </p>
@@ -45,7 +45,7 @@ export default async function SettingsPage() {
                 <div>
                   <CardTitle className="font-mono text-sm">{hook.targetUrl}</CardTitle>
                   <p className="text-xs text-muted-foreground">
-                    Fires on: {hook.triggerOn.join(", ") || "nothing configured"}
+                    Fires on: {hook.triggerOn.map((s) => JOB_STATUS_LABEL[s]).join(", ") || "nothing configured"}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">

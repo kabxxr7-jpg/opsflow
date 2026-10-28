@@ -27,7 +27,7 @@ export default function LoginPage() {
             <Workflow className="size-5" aria-hidden />
           </span>
           <div className="space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Opsflow</h1>
+            <h1 className="font-display text-3xl font-medium tracking-tight">Opsflow</h1>
             <p className="text-sm text-muted-foreground">
               Staged around <span className="font-medium text-foreground">{SCENARIO.company}</span>,{" "}
               {SCENARIO.description}

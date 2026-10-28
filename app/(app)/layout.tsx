@@ -1,4 +1,4 @@
-import { Nav } from "@/components/nav";
+import { Sidebar } from "@/components/sidebar";
 
 // All routes under this layout read the session cookie (via proxy.ts) and hit the DB directly.
 // Cache Components' instant-navigation validation flags that as un-prerenderable, correctly, since
@@ -8,9 +8,9 @@ export const instant = false;
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-muted/20">
-      <Nav />
-      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+    <div className="flex min-h-screen bg-muted/20 md:flex-row flex-col">
+      <Sidebar />
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 md:px-8">{children}</main>
     </div>
   );
 }

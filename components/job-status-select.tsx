@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import type { JobStatus } from "@prisma/client";
 import { updateJobStatus } from "@/app/(app)/jobs/actions";
+import { JOB_STATUS_LABEL } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -25,17 +26,17 @@ export function JobStatusSelect({ jobId, status }: { jobId: string; status: JobS
         if (!value) return;
         startTransition(async () => {
           await updateJobStatus(jobId, value as JobStatus);
-          toast.success(`Job status updated to ${value}.`);
+          toast.success(`Job status updated to ${JOB_STATUS_LABEL[value as JobStatus]}.`);
         });
       }}
     >
       <SelectTrigger size="sm" className="w-[140px]">
-        <SelectValue />
+        <SelectValue>{(value: JobStatus) => JOB_STATUS_LABEL[value]}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {STATUSES.map((s) => (
           <SelectItem key={s} value={s}>
-            {s}
+            {JOB_STATUS_LABEL[s]}
           </SelectItem>
         ))}
       </SelectContent>

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { JOB_STATUS_LABEL } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -107,7 +108,7 @@ export function WebhookFormDialog({ mode, configId, initial, trigger }: Props) {
                     checked={config.triggerOn.includes(status)}
                     onCheckedChange={(checked) => toggleStatus(status, checked === true)}
                   />
-                  {status}
+                  {JOB_STATUS_LABEL[status]}
                 </label>
               ))}
             </div>

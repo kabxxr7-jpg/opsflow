@@ -95,7 +95,7 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6 animate-fade-up">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <h1 className="font-display text-3xl font-medium tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
           Seeded demo data, mock field-service connector.
         </p>

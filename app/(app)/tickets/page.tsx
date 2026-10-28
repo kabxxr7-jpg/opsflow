@@ -21,7 +21,7 @@ export default async function TicketsPage() {
     <div className="space-y-6 animate-fade-up">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tickets</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight">Tickets</h1>
           <p className="text-sm text-muted-foreground">
             Simulated customer inquiries (phone, chat, email), classified by Gemini with
             schema-validated, source-grounded output.

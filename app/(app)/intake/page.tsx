@@ -16,7 +16,7 @@ export default async function IntakePage() {
   return (
     <div className="space-y-6 animate-fade-up">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Document intake</h1>
+        <h1 className="font-display text-3xl font-medium tracking-tight">Document intake</h1>
         <p className="text-sm text-muted-foreground">
           OCR (Tesseract.js, no cloud account) feeds extracted text into the same classification
           pipeline as a typed ticket. Proves the pipeline shape, not production-grade handwriting

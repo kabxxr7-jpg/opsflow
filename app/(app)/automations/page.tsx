@@ -23,7 +23,7 @@ export default async function AutomationsPage() {
     <div className="space-y-6 animate-fade-up">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Automations</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight">Automations</h1>
           <p className="text-sm text-muted-foreground">
             Trigger → filter → action rules, evaluated on every job status change and new ticket.
           </p>

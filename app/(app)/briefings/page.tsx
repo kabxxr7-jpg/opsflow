@@ -25,7 +25,7 @@ export default async function BriefingsPage() {
     <div className="space-y-6 animate-fade-up">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Daily briefings</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight">Daily briefings</h1>
           <p className="text-sm text-muted-foreground">
             AI-generated summaries of ticket activity, with source citations and confidence scores.
           </p>

@@ -20,7 +20,7 @@ export default async function JobsPage() {
   return (
     <div className="space-y-6 animate-fade-up">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
+        <h1 className="font-display text-3xl font-medium tracking-tight">Jobs</h1>
         <p className="text-sm text-muted-foreground">
           Simulated field-service jobs, seeded for this demo.
         </p>
