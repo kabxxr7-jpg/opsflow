@@ -1,0 +1,304 @@
+{
+  "name": "Opsflow Ticket Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ticket-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ccb794c7-9a9c-450d-8985-28c39880d8c4",
+      "name": "Webhook: Incoming Inquiry",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-640, 300],
+      "webhookId": "opsflow-ticket-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate the incoming payload shape before anything downstream touches it.\n// A malformed request should fail here, not three nodes later against a\n// confusing error from the classify endpoint.\nconst body = $input.item.json.body ?? $input.item.json;\nconst rawText = typeof body.rawText === 'string' ? body.rawText.trim() : '';\nconst source = typeof body.source === 'string' && body.source.trim() ? body.source.trim() : 'n8n';\n\nif (!rawText) {\n  throw new Error('rawText is required and must be a non-empty string.');\n}\n\nreturn [{ json: { rawText, source } }];"
+      },
+      "id": "0e63d646-0eeb-4bdd-9716-3dd6aa7ca1c2",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-420, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sign the request to Opsflow's classify endpoint with the same HMAC scheme\n// Opsflow's own outbound webhooks use (lib/webhooks.ts signPayload): HMAC-SHA256\n// over `timestamp + \".\" + body`. This lets the receiver verify authenticity and\n// reject stale requests, the same discipline in both directions.\nconst crypto = require('crypto');\n\nconst rawText = $json.rawText;\nconst source = $json.source;\nconst body = JSON.stringify({ rawText });\nconst timestamp = new Date().toISOString();\nconst secret = $env.OPSFLOW_N8N_SECRET;\n\nif (!secret) {\n  throw new Error('OPSFLOW_N8N_SECRET is not set on this n8n instance. Add it under Settings > Variables, matching Opsflow\\'s N8N_CALLBACK_SECRET.');\n}\n\nconst signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');\n\nreturn [{ json: { rawText, source, body, timestamp, signature } }];"
+      },
+      "id": "1fa195eb-6645-4204-b38a-60ef2ac4fae3",
+      "name": "Sign Classify Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPSFLOW_BASE_URL }}/api/integrations/classify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Webhook-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-Webhook-Signature",
+              "value": "=sha256={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "18a7476b-bfaa-47ab-a584-afc775c0cdb0",
+      "name": "Call Opsflow: Classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the classify response with the original rawText/source, which the\n// HTTP Request node's output doesn't carry forward on its own.\nconst classification = $input.item.json;\nconst original = $('Sign Classify Request').item.json;\n\nreturn [{\n  json: {\n    rawText: original.rawText,\n    source: original.source,\n    classification: classification.classification,\n    priority: classification.priority,\n    summary: classification.summary,\n    confidence: classification.confidence,\n    sourceSnippet: classification.sourceSnippet,\n  },\n}];"
+      },
+      "id": "7ccbb99a-1ebd-4df6-8119-7400bb5d1d0b",
+      "name": "Merge Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 0.7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04abe8ab-6214-4586-8d1d-f1263ca1d478",
+      "name": "IF: Confidence >= 0.7",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same signing scheme as the classify call, for the callback that actually\n// creates the ticket in Opsflow.\nconst crypto = require('crypto');\n\nconst data = $json;\nconst body = JSON.stringify({\n  rawText: data.rawText,\n  source: data.source,\n  classification: data.classification,\n  priority: data.priority,\n  summary: data.summary,\n  confidence: data.confidence,\n  sourceSnippet: data.sourceSnippet,\n});\nconst timestamp = new Date().toISOString();\nconst secret = $env.OPSFLOW_N8N_SECRET;\nconst signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');\n\nreturn [{ json: { body, timestamp, signature } }];"
+      },
+      "id": "fbabea2b-2278-44c8-b1af-9e76395a7884",
+      "name": "Sign Callback Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPSFLOW_BASE_URL }}/api/integrations/n8n-callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Webhook-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-Webhook-Signature",
+              "value": "=sha256={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "4681544d-1f08-4faf-bbe2-46b3fedc7450",
+      "name": "Call Opsflow: Create Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 180]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6a1e9b3c-2f4d-4e5a-9c1b-7d8e9f0a1b2c",
+              "name": "status",
+              "type": "string",
+              "value": "pending_manual_review"
+            },
+            {
+              "id": "7b2f0c4d-3a5e-4f6b-8d2c-8e9f0a1b2c3d",
+              "name": "reason",
+              "type": "string",
+              "value": "=Classification confidence {{ $json.confidence }} is below the 0.7 auto-process threshold. AI recommends, a person decides."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "58b727d0-1d43-4e5b-87fd-e95cdb2f55ad",
+      "name": "Flag for Manual Review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [680, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "478d3ccc-0863-40cc-88bf-56d8160112fb",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Incoming Inquiry": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Sign Classify Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Classify Request": {
+      "main": [
+        [
+          {
+            "node": "Call Opsflow: Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Opsflow: Classify": {
+      "main": [
+        [
+          {
+            "node": "Merge Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Classification": {
+      "main": [
+        [
+          {
+            "node": "IF: Confidence >= 0.7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Confidence >= 0.7": {
+      "main": [
+        [
+          {
+            "node": "Sign Callback Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Flag for Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Callback Request": {
+      "main": [
+        [
+          {
+            "node": "Call Opsflow: Create Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Opsflow: Create Ticket": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flag for Manual Review": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "",
+  "meta": {
+    "instanceId": "opsflow-portfolio-demo"
+  },
+  "tags": []
+}

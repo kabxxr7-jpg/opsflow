@@ -1,0 +1,112 @@
+import { db } from "@/lib/db";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { formatDateTime } from "@/lib/utils";
+
+type ActivityItem = {
+  id: string;
+  kind: "automation" | "webhook";
+  label: string;
+  detail: string;
+  success: boolean | "skipped";
+  createdAt: Date;
+};
+
+export default async function DashboardPage() {
+  const [jobCount, openJobs, ticketCount, ruleCount, recentRuns, recentDeliveries] = await Promise.all([
+    db.job.count(),
+    db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
+    db.ticket.count(),
+    db.automationRule.count({ where: { isActive: true } }),
+    db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
+    db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
+  ]);
+
+  const stats = [
+    { label: "Total jobs", value: jobCount },
+    { label: "Open jobs", value: openJobs },
+    { label: "Tickets", value: ticketCount },
+    { label: "Active automation rules", value: ruleCount },
+  ];
+
+  const activity: ActivityItem[] = [
+    ...recentRuns.map((run) => ({
+      id: `run-${run.id}`,
+      kind: "automation" as const,
+      label: run.rule.name,
+      detail: run.log ?? "",
+      success: run.status === "SUCCESS" ? true : run.status === "SKIPPED" ? ("skipped" as const) : false,
+      createdAt: run.createdAt,
+    })),
+    ...recentDeliveries.map((delivery) => ({
+      id: `delivery-${delivery.id}`,
+      kind: "webhook" as const,
+      label: delivery.webhookConfig.targetUrl,
+      detail: delivery.success
+        ? `Delivered, ${delivery.statusCode}, ${delivery.durationMs}ms`
+        : (delivery.errorMessage ?? "Failed"),
+      success: delivery.success,
+      createdAt: delivery.createdAt,
+    })),
+  ]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 10);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          Seeded demo data, mock field-service connector.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {stats.map((stat) => (
+          <Card key={stat.label}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {stat.label}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-semibold">{stat.value}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Recent activity</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Automation runs and webhook deliveries, proof the engine actually ran, not just stat
+            cards.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {activity.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No activity yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {activity.map((item) => (
+                <div key={item.id} className="flex items-start gap-2 text-xs">
+                  <Badge
+                    variant={item.success === true ? "default" : item.success === "skipped" ? "secondary" : "destructive"}
+                    className="shrink-0"
+                  >
+                    {item.kind === "automation" ? "rule" : "webhook"}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-foreground">{item.label}</p>
+                    <p className="truncate text-muted-foreground">{item.detail}</p>
+                  </div>
+                  <span className="shrink-0 text-muted-foreground">{formatDateTime(item.createdAt)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

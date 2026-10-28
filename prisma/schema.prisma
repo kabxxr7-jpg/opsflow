@@ -1,0 +1,172 @@
+// Prisma schema for Opsflow — a field-service ops automation + AI reporting platform.
+// Data is seeded/simulated (mock connector), modeled on real-world field-service platforms.
+// Not a claim of integration with any specific named vendor.
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  createdAt DateTime @default(now())
+  jobs      Job[]
+}
+
+model Technician {
+  id        String   @id @default(cuid())
+  name      String
+  skills    String[] @default([])
+  createdAt DateTime @default(now())
+  jobs      Job[]
+}
+
+enum JobStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Job {
+  id           String      @id @default(cuid())
+  customerId   String
+  customer     Customer    @relation(fields: [customerId], references: [id])
+  technicianId String?
+  technician   Technician? @relation(fields: [technicianId], references: [id])
+  jobType      String
+  status       JobStatus   @default(SCHEDULED)
+  scheduledAt  DateTime?
+  completedAt  DateTime?
+  revenue      Decimal?    @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tickets           Ticket[]
+  automationRuns    AutomationRun[]
+  webhookDeliveries WebhookDelivery[]
+
+  @@index([status])
+  @@index([customerId])
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Ticket {
+  id        String   @id @default(cuid())
+  jobId     String?
+  job       Job?     @relation(fields: [jobId], references: [id])
+  rawText   String
+  source    String
+  createdAt DateTime @default(now())
+
+  // AI-extracted fields, Zod-validated before being persisted here
+  classification String?
+  priority       TicketPriority?
+  summary        String?
+  confidence     Float?
+  sourceSnippet  String?
+
+  // Set only for source: "ocr_upload" tickets. Distinct from `confidence` (the AI
+  // classification's confidence) — a low OCR score means the extracted text itself may be
+  // garbled, a different failure mode than the AI being unsure how to classify clear text.
+  ocrConfidence Float?
+
+  @@index([classification])
+  @@index([jobId])
+}
+
+model AutomationRule {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  trigger   Json
+  filters   Json?
+  actions   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runs AutomationRun[]
+}
+
+enum RunStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model AutomationRun {
+  id        String         @id @default(cuid())
+  ruleId    String
+  rule      AutomationRule @relation(fields: [ruleId], references: [id])
+  jobId     String?
+  job       Job?           @relation(fields: [jobId], references: [id])
+  status    RunStatus
+  log       String?
+  createdAt DateTime       @default(now())
+
+  @@index([ruleId])
+  @@index([jobId])
+}
+
+model WebhookConfig {
+  id         String      @id @default(cuid())
+  targetUrl  String
+  secret     String
+  isActive   Boolean     @default(true)
+  // Job statuses that fire this webhook, e.g. [COMPLETED] fires only when a job completes.
+  triggerOn  JobStatus[] @default([])
+  createdAt  DateTime    @default(now())
+
+  deliveries WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id              String        @id @default(cuid())
+  webhookConfigId String
+  webhookConfig   WebhookConfig @relation(fields: [webhookConfigId], references: [id])
+  jobId           String?
+  job             Job?          @relation(fields: [jobId], references: [id])
+  eventType       String
+  payload         Json
+  attemptNumber   Int
+  statusCode      Int?
+  responseBody    String?
+  success         Boolean
+  errorMessage    String?
+  durationMs      Int?
+  nextRetryAt     DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([success, nextRetryAt])
+  @@index([jobId])
+}
+
+model DailyBriefing {
+  id         String   @id @default(cuid())
+  date       DateTime @default(now())
+  summary    String
+  highlights Json
+  createdAt  DateTime @default(now())
+}
+
+// Single-user profile, same pattern as project 1: no multi-tenancy, this app has exactly one row.
+model Profile {
+  id        String   @id @default(cuid())
+  updatedAt DateTime @updatedAt
+}
