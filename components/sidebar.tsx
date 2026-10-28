@@ -13,9 +13,17 @@ import {
   Workflow,
   LogOut,
   Info,
+  MoreHorizontal,
 } from "lucide-react";
 import { logout } from "@/app/logout/actions";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
@@ -28,6 +36,11 @@ const LINKS = [
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/about", label: "About", icon: Info },
 ];
+
+// The five most-used destinations get a thumb-reachable bottom tab; the rest live in the "More"
+// overflow menu in the mobile top bar. Field techs on a phone shouldn't have to pinch-read a
+// wrapping row of text links to find the thing they want.
+const BOTTOM_TABS = ["/dashboard", "/jobs", "/tickets", "/automations", "/briefings"];
 
 function useIsActive() {
   const pathname = usePathname();
@@ -47,6 +60,8 @@ function Wordmark() {
 
 export function Sidebar() {
   const isActive = useIsActive();
+  const bottomLinks = LINKS.filter((l) => BOTTOM_TABS.includes(l.href));
+  const overflowLinks = LINKS.filter((l) => !BOTTOM_TABS.includes(l.href));
 
   return (
     <>
@@ -81,31 +96,54 @@ export function Sidebar() {
         </form>
       </aside>
 
-      {/* Mobile: top bar */}
+      {/* Mobile: slim top bar (brand + overflow) */}
       <header className="sticky top-0 z-10 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75 md:hidden">
-        <div className="flex flex-wrap items-center justify-between gap-y-2 px-4 py-3">
+        <div className="flex items-center justify-between px-4 py-3">
           <Wordmark />
-          <form action={logout}>
-            <Button type="submit" variant="ghost" size="sm">
-              Sign out
-            </Button>
-          </form>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button type="button" variant="ghost" size="icon-sm" aria-label="More">
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              {overflowLinks.map((link) => (
+                <DropdownMenuItem key={link.href} render={<Link href={link.href} />}>
+                  <link.icon className="size-4" aria-hidden />
+                  {link.label}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => logout()}>
+                <LogOut className="size-4" aria-hidden />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <nav className="flex flex-wrap gap-x-4 gap-y-1 px-4 pb-3 text-sm text-muted-foreground">
-          {LINKS.map((link) => {
-            const active = isActive(link.href);
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn("transition-colors hover:text-foreground", active && "font-medium text-primary")}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
-        </nav>
       </header>
+
+      {/* Mobile: fixed bottom tab bar */}
+      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 md:hidden">
+        {bottomLinks.map((link) => {
+          const active = isActive(link.href);
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] text-muted-foreground transition-colors",
+                active && "text-primary"
+              )}
+            >
+              <link.icon className="size-5" aria-hidden />
+              {link.label}
+            </Link>
+          );
+        })}
+      </nav>
     </>
   );
 }

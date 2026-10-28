@@ -1,7 +1,8 @@
+import { Briefcase } from "lucide-react";
 import { db } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import { JobStatusSelect } from "@/components/job-status-select";
-import { formatDate } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -10,6 +11,55 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { JobStatus } from "@prisma/client";
+
+const STATUS_BORDER: Record<JobStatus, string> = {
+  SCHEDULED: "border-l-[var(--chart-1)]",
+  IN_PROGRESS: "border-l-[var(--chart-3)]",
+  COMPLETED: "border-l-[var(--chart-2)]",
+  CANCELLED: "border-l-[var(--chart-5)]",
+};
+
+const AVATAR_COLORS = [
+  "bg-[var(--chart-1)]",
+  "bg-[var(--chart-2)]",
+  "bg-[var(--chart-3)]",
+  "bg-[var(--chart-4)]",
+];
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function avatarColor(name: string) {
+  const hash = name.split("").reduce((sum, c) => sum + c.charCodeAt(0), 0);
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function TechAvatar({ name }: { name: string | null | undefined }) {
+  if (!name) {
+    return (
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+        —
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium text-white",
+        avatarColor(name)
+      )}
+    >
+      {initials(name)}
+    </span>
+  );
+}
 
 export default async function JobsPage() {
   const jobs = await db.job.findMany({
@@ -20,7 +70,10 @@ export default async function JobsPage() {
   return (
     <div className="space-y-6 animate-fade-up">
       <div>
-        <h1 className="font-display text-3xl font-medium tracking-tight">Jobs</h1>
+        <h1 className="flex items-center gap-2 font-display text-3xl font-medium tracking-tight">
+          <Briefcase className="size-7 text-primary" aria-hidden />
+          Jobs
+        </h1>
         <p className="text-sm text-muted-foreground">
           Simulated field-service jobs, seeded for this demo.
         </p>
@@ -29,19 +82,22 @@ export default async function JobsPage() {
       {/* Mobile: a card per job, nothing requires horizontal scrolling to find */}
       <div className="space-y-3 md:hidden">
         {jobs.map((job) => (
-          <Card key={job.id}>
+          <Card key={job.id} className={cn("border-l-4", STATUS_BORDER[job.status])}>
             <CardContent className="space-y-2 py-4">
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-medium">{job.customer.name}</p>
-                  <p className="text-sm text-muted-foreground">{job.jobType}</p>
+                <div className="flex items-center gap-2">
+                  <TechAvatar name={job.technician?.name} />
+                  <div>
+                    <p className="font-medium">{job.customer.name}</p>
+                    <p className="text-sm text-muted-foreground">{job.jobType}</p>
+                  </div>
                 </div>
                 <JobStatusSelect jobId={job.id} status={job.status} />
               </div>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{job.technician?.name ?? "Unassigned"}</span>
                 <span>{job.scheduledAt ? formatDate(job.scheduledAt) : "—"}</span>
-                <span className="font-medium text-foreground">
+                <span className="text-sm font-semibold text-foreground">
                   {job.revenue ? `$${job.revenue.toString()}` : "—"}
                 </span>
               </div>
@@ -66,17 +122,22 @@ export default async function JobsPage() {
             </TableHeader>
             <TableBody>
               {jobs.map((job) => (
-                <TableRow key={job.id}>
+                <TableRow key={job.id} className={cn("border-l-4", STATUS_BORDER[job.status])}>
                   <TableCell className="font-medium">{job.customer.name}</TableCell>
                   <TableCell>{job.jobType}</TableCell>
-                  <TableCell>{job.technician?.name ?? "Unassigned"}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <TechAvatar name={job.technician?.name} />
+                      {job.technician?.name ?? "Unassigned"}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <JobStatusSelect jobId={job.id} status={job.status} />
                   </TableCell>
                   <TableCell>
                     {job.scheduledAt ? formatDate(job.scheduledAt) : "—"}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right font-semibold">
                     {job.revenue ? `$${job.revenue.toString()}` : "—"}
                   </TableCell>
                 </TableRow>

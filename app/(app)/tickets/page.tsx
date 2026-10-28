@@ -1,8 +1,11 @@
+import { Ticket as TicketIcon, Eye } from "lucide-react";
 import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { NewTicketDialog } from "@/components/new-ticket-dialog";
 import { ClassifyTicketButton } from "@/components/classify-ticket-button";
+import { TicketDetailSheet } from "@/components/ticket-detail-sheet";
 import { formatDate } from "@/lib/utils";
 
 const PRIORITY_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -21,7 +24,10 @@ export default async function TicketsPage() {
     <div className="space-y-6 animate-fade-up">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight">Tickets</h1>
+          <h1 className="flex items-center gap-2 font-display text-3xl font-medium tracking-tight">
+            <TicketIcon className="size-7 text-primary" aria-hidden />
+            Tickets
+          </h1>
           <p className="text-sm text-muted-foreground">
             Simulated customer inquiries (phone, chat, email), classified by Gemini with
             schema-validated, source-grounded output.
@@ -37,9 +43,13 @@ export default async function TicketsPage() {
             ticket.confidence < LOW_CONFIDENCE_THRESHOLD;
           const groundingMismatch =
             needsReview && ticket.sourceSnippet !== null && !ticket.rawText.includes(ticket.sourceSnippet);
+          const isUrgent = ticket.priority === "URGENT";
 
           return (
-            <Card key={ticket.id}>
+            <Card
+              key={ticket.id}
+              className={isUrgent ? "border-l-4 border-l-destructive" : undefined}
+            >
               <CardHeader className="pb-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -50,9 +60,19 @@ export default async function TicketsPage() {
                       <>
                         <Badge>{ticket.classification.replace(/_/g, " ")}</Badge>
                         {ticket.priority ? (
-                          <Badge variant={PRIORITY_VARIANT[ticket.priority]}>{ticket.priority}</Badge>
+                          <Badge variant={PRIORITY_VARIANT[ticket.priority]} className="text-[11px]">
+                            {ticket.priority}
+                          </Badge>
                         ) : null}
                         {needsReview ? <Badge variant="destructive">needs review</Badge> : null}
+                        <TicketDetailSheet
+                          ticket={ticket}
+                          trigger={
+                            <Button type="button" variant="ghost" size="icon-sm" aria-label="View details">
+                              <Eye className="size-3.5" />
+                            </Button>
+                          }
+                        />
                       </>
                     ) : (
                       <>
@@ -66,7 +86,7 @@ export default async function TicketsPage() {
               <CardContent className="space-y-2">
                 <p className="text-sm">{ticket.rawText}</p>
                 {ticket.summary ? (
-                  <div className="space-y-1 border-t pt-2 text-xs text-muted-foreground">
+                  <div className="space-y-1 rounded-md border-l-2 border-primary/30 bg-muted/30 py-2 pr-2 pl-3 text-xs text-muted-foreground">
                     <p>
                       <span className="font-medium text-foreground">AI summary: </span>
                       {ticket.summary}

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
-import { Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { classifyTicketById } from "@/app/(app)/tickets/actions";
 import { Button } from "@/components/ui/button";
 
@@ -26,7 +26,7 @@ export function ClassifyTicketButton({ ticketId }: { ticketId: string }) {
         })
       }
     >
-      <Sparkles className="size-3.5" />
+      {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
       {isPending ? "Classifying..." : "Classify"}
     </Button>
   );

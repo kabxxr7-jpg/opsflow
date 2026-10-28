@@ -1,15 +1,27 @@
 import Link from "next/link";
-import { ArrowRight, Briefcase, FolderClock, Search, Ticket, Zap } from "lucide-react";
+import {
+  ArrowRight,
+  Briefcase,
+  CheckCircle2,
+  CircleDashed,
+  FolderClock,
+  Search,
+  Ticket,
+  Webhook as WebhookIcon,
+  XCircle,
+  Zap,
+} from "lucide-react";
 import { db } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 import { SCENARIO } from "@/lib/scenario";
 import { JobsByStatusChart } from "@/components/jobs-by-status-chart";
 import { AutomationOutcomesChart } from "@/components/automation-outcomes-chart";
+import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 
 const JOB_STATUS_ORDER = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 const RUN_OUTCOME_ORDER = ["SUCCESS", "SKIPPED", "FAILED"];
+const NOTIFY_RULE_NAME = "Notify on job completion over $500";
 
 function startHere(hasNeedsReview: boolean) {
   return [
@@ -53,6 +65,9 @@ export default async function DashboardPage() {
     jobsByStatus,
     runsByOutcome,
     needsReviewCount,
+    completedAgg,
+    notifyRule,
+    completedJobs,
   ] = await Promise.all([
     db.job.count(),
     db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
@@ -63,7 +78,17 @@ export default async function DashboardPage() {
     db.job.groupBy({ by: ["status"], _count: { _all: true } }),
     db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
     db.ticket.count({ where: { confidence: { lt: 0.5 } } }),
+    db.job.aggregate({ where: { status: "COMPLETED" }, _sum: { revenue: true }, _count: true }),
+    db.automationRule.findFirst({ where: { name: NOTIFY_RULE_NAME } }),
+    db.job.findMany({
+      where: { status: "COMPLETED", completedAt: { not: null } },
+      select: { completedAt: true, revenue: true },
+    }),
   ]);
+
+  const notifiedCount = notifyRule
+    ? await db.automationRun.count({ where: { ruleId: notifyRule.id, status: "SUCCESS" } })
+    : 0;
 
   // generateDailyBriefing() is only ever called by prisma/seed.ts (once) or the daily
   // simulate-day cron, never by an ad-hoc user action elsewhere in the app, so its most recent
@@ -80,6 +105,20 @@ export default async function DashboardPage() {
     outcome,
     count: runsByOutcome.find((g) => g.status === outcome)?._count._all ?? 0,
   })).filter((d) => d.count > 0);
+
+  const revenueByDay = new Map<string, number>();
+  for (const job of completedJobs) {
+    if (!job.completedAt) continue;
+    const key = job.completedAt.toISOString().slice(0, 10);
+    revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + Number(job.revenue ?? 0));
+  }
+  const revenueTrendData = Array.from(revenueByDay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-7)
+    .map(([date, revenue]) => ({
+      label: new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      revenue: Math.round(revenue * 100) / 100,
+    }));
 
   const stats = [
     { label: "Total jobs", value: jobCount, icon: Briefcase },
@@ -102,7 +141,7 @@ export default async function DashboardPage() {
       kind: "webhook" as const,
       label: delivery.webhookConfig.targetUrl,
       detail: delivery.success
-        ? `Delivered, ${delivery.statusCode}, ${delivery.durationMs}ms`
+        ? `${delivery.statusCode} · ${delivery.durationMs}ms`
         : (delivery.errorMessage ?? "Failed"),
       success: delivery.success,
       createdAt: delivery.createdAt,
@@ -110,6 +149,8 @@ export default async function DashboardPage() {
   ]
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .slice(0, 10);
+
+  const completedRevenue = Number(completedAgg._sum.revenue ?? 0);
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -120,7 +161,34 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+      {/* Hero metric — the one number the eye should land on first */}
+      <Card className="border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent">
+        <CardContent className="py-6">
+          <p className="font-display text-4xl font-medium tracking-tight text-foreground sm:text-5xl">
+            {completedAgg._count} jobs completed
+            <span className="text-primary"> · ${completedRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Owner notified automatically on {notifiedCount} job{notifiedCount === 1 ? "" : "s"} that
+            cleared $500 — nobody had to remember to check.
+          </p>
+          {lastRunAt ? (
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
+                <span className="relative inline-flex size-2 rounded-full bg-primary" />
+              </span>
+              Last automated run: {formatDateTime(lastRunAt)} — a cron job runs this daily; see{" "}
+              <a href="/about" className="underline underline-offset-2 hover:text-foreground">
+                /about
+              </a>
+              .
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardContent className="py-5">
           <p className="text-sm text-foreground">
             <span className="font-medium">{SCENARIO.company}</span> — {SCENARIO.description}
@@ -130,20 +198,11 @@ export default async function DashboardPage() {
             reading and sorting every incoming phone/chat/email message, and remembering to
             chase the jobs actually worth following up on.
           </p>
-          <p className="mt-2 text-sm font-medium text-foreground">
+          <p className="mt-2 text-xs text-muted-foreground">
             This isn&apos;t a mockup — the dates span a simulated month of business, but every
             classification, automation run, and briefing on it was produced by the app&apos;s real
             code, not written in by hand.
           </p>
-          {lastRunAt ? (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Last automated run: {formatDateTime(lastRunAt)} — a cron job runs this daily; see{" "}
-              <a href="/about" className="underline underline-offset-2 hover:text-foreground">
-                /about
-              </a>
-              .
-            </p>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -220,6 +279,20 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
+      {revenueTrendData.length > 1 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Revenue by day</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Completed-job revenue, most recent days with activity.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <RevenueTrendChart data={revenueTrendData} />
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Recent activity</CardTitle>
@@ -232,22 +305,32 @@ export default async function DashboardPage() {
           {activity.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity yet.</p>
           ) : (
-            <div className="space-y-2">
-              {activity.map((item) => (
-                <div key={item.id} className="flex items-start gap-2 text-xs">
-                  <Badge
-                    variant={item.success === true ? "default" : item.success === "skipped" ? "secondary" : "destructive"}
-                    className="shrink-0"
-                  >
-                    {item.kind === "automation" ? "rule" : "webhook"}
-                  </Badge>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-foreground">{item.label}</p>
-                    <p className="truncate text-muted-foreground">{item.detail}</p>
+            <div className="space-y-1">
+              {activity.map((item) => {
+                const StatusIcon =
+                  item.success === true ? CheckCircle2 : item.success === "skipped" ? CircleDashed : XCircle;
+                const statusColor =
+                  item.success === true
+                    ? "text-[var(--chart-2)]"
+                    : item.success === "skipped"
+                      ? "text-muted-foreground"
+                      : "text-destructive";
+                return (
+                  <div key={item.id} className="flex items-center gap-2.5 rounded-md px-1 py-1.5 text-xs hover:bg-muted/40">
+                    <StatusIcon className={`size-4 shrink-0 ${statusColor}`} aria-hidden />
+                    {item.kind === "webhook" ? (
+                      <WebhookIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                    ) : (
+                      <Zap className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-foreground">{item.label}</p>
+                      <p className="truncate text-muted-foreground">{item.detail}</p>
+                    </div>
+                    <span className="shrink-0 text-muted-foreground">{formatDateTime(item.createdAt)}</span>
                   </div>
-                  <span className="shrink-0 text-muted-foreground">{formatDateTime(item.createdAt)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

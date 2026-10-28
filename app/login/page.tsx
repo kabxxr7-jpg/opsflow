@@ -44,6 +44,40 @@ export default function LoginPage() {
               {SCENARIO.description}
             </p>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border bg-card p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Before</p>
+              <div className="space-y-1.5">
+                <div className="h-2 w-full rounded bg-muted" />
+                <div className="h-2 w-5/6 rounded bg-muted" />
+                <div className="h-2 w-full rounded bg-muted" />
+                <div className="h-2 w-4/6 rounded bg-muted" />
+              </div>
+              <p className="mt-2.5 text-xs text-muted-foreground">
+                12 unread messages, no priority, nobody&apos;s watching for the big one.
+              </p>
+            </div>
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <p className="mb-2 text-xs font-medium text-primary">With Opsflow</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
+                  <div className="h-2 flex-1 rounded bg-destructive/20" />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="size-1.5 shrink-0 rounded-full bg-[var(--chart-3)]" />
+                  <div className="h-2 flex-1 rounded bg-[var(--chart-3)]/25" />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="size-1.5 shrink-0 rounded-full bg-[var(--chart-2)]" />
+                  <div className="h-2 flex-1 rounded bg-[var(--chart-2)]/25" />
+                </div>
+              </div>
+              <p className="mt-2.5 text-xs font-medium text-foreground">
+                3 urgent · 2 follow-ups · owner notified on a $810 job.
+              </p>
+            </div>
+          </div>
           <ul className="space-y-3">
             {PITCH_POINTS.map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-start gap-2.5 text-sm text-muted-foreground">
