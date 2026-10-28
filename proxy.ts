@@ -5,7 +5,9 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 // /api/cron/* has its own CRON_SECRET bearer check — neither can present a browser session
 // cookie, Vercel Cron and external callers like n8n don't have one. The session gate below is
 // for the authenticated UI only.
-const PUBLIC_PATHS = ["/login", "/api/integrations", "/api/cron"];
+// /about is public too — it's linked from the login screen specifically so a visitor can decide
+// whether this is relevant to them before bothering to log in at all.
+const PUBLIC_PATHS = ["/login", "/about", "/api/integrations", "/api/cron"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

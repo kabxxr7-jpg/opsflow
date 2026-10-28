@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Workflow, Zap, Sparkles, Webhook } from "lucide-react";
+import { Workflow, Bell, Inbox, History, Code2, Info } from "lucide-react";
 import { login } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,10 +9,21 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { SCENARIO } from "@/lib/scenario";
 
+const REPO_URL = "https://github.com/kabxxr7-jpg/opsflow";
+
 const PITCH_POINTS = [
-  { icon: Zap, text: "Trigger → filter → action automation, with a real run history" },
-  { icon: Sparkles, text: "AI ticket triage with source-grounded, schema-validated output" },
-  { icon: Webhook, text: "HMAC-signed webhooks, delivered and retried, both directions" },
+  {
+    icon: Bell,
+    text: "The moment a job worth over $500 wraps up, you're notified automatically — nobody has to remember to tell you.",
+  },
+  {
+    icon: Inbox,
+    text: "Every incoming message is read and sorted the moment it arrives, and the AI says so itself when it's unsure, instead of guessing.",
+  },
+  {
+    icon: History,
+    text: "Runs quietly in the background and keeps a full record of everything it did, so nothing falls through the cracks.",
+  },
 ];
 
 export default function LoginPage() {
@@ -41,9 +52,9 @@ export default function LoginPage() {
               </li>
             ))}
           </ul>
-          <p className="text-xs text-muted-foreground">
-            All data is simulated. Every number you&apos;ll see is produced by the app&apos;s real
-            functions, not placeholder text.
+          <p className="text-sm font-medium text-foreground">
+            This isn&apos;t a mockup — every number past this screen was generated today, by the
+            same AI and automation code a real deployment would run.
           </p>
         </div>
 
@@ -63,7 +74,7 @@ export default function LoginPage() {
               ) : null}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <form action={formAction} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
@@ -74,6 +85,21 @@ export default function LoginPage() {
                 {pending ? "Signing in..." : "Sign in"}
               </Button>
             </form>
+            <div className="flex items-center justify-center gap-4 border-t pt-4 text-xs text-muted-foreground">
+              <a href="/about" className="inline-flex items-center gap-1.5 hover:text-foreground">
+                <Info className="size-3.5" aria-hidden />
+                What is this?
+              </a>
+              <a
+                href={REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 hover:text-foreground"
+              >
+                <Code2 className="size-3.5" aria-hidden />
+                Source on GitHub
+              </a>
+            </div>
           </CardContent>
         </Card>
       </div>

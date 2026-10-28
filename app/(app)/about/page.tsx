@@ -1,7 +1,14 @@
-import { Code2, Sparkles, ShieldCheck, Layers, Compass } from "lucide-react";
+import { Code2, Sparkles, ShieldCheck, Layers, Compass, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const REPO_URL = "https://github.com/kabxxr7-jpg/opsflow";
+
+const TLDR = [
+  "Reads every incoming customer message and sorts it by urgency automatically, instead of someone having to do that by hand.",
+  "Notifies you the moment a completed job is worth following up on — no one has to remember to flag it.",
+  "Everything on this site is real: every number was generated today by the actual AI and automation code, not written in to look good.",
+  "This proves the automation + AI engine works end to end. Voice agents, multi-agent AI, and multi-user accounts aren't built — the technical sections below explain why, and what a real engagement would add.",
+];
 
 const STACK = [
   { name: "Next.js 16 (App Router) + TypeScript", why: "Server Components for every page, Server Actions for mutations." },
@@ -51,6 +58,26 @@ export default function AboutPage() {
           View source on GitHub
         </a>
       </div>
+
+      <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+        <CardHeader>
+          <CardTitle className="text-base">In plain terms</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2.5">
+            {TLDR.map((line) => (
+              <li key={line} className="flex items-start gap-2.5 text-sm text-foreground">
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                {line}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-xs text-muted-foreground">
+            Everything below this point is the technical detail behind those four lines, for
+            anyone who wants to verify the claims rather than take them on faith.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
