@@ -53,8 +53,13 @@ export default function LoginPage() {
             ))}
           </ul>
           <p className="text-sm font-medium text-foreground">
-            This isn&apos;t a mockup — every number past this screen was generated today, by the
-            same AI and automation code a real deployment would run.
+            This isn&apos;t a mockup — the dates span a simulated month of business, but every
+            classification and automation run behind them was produced by the app&apos;s real
+            code, refreshed daily by a cron job (see{" "}
+            <a href="/about" className="underline underline-offset-2 hover:text-primary">
+              /about
+            </a>
+            ).
           </p>
         </div>
 

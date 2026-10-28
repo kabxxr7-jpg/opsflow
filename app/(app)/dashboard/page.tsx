@@ -28,7 +28,7 @@ function startHere(hasNeedsReview: boolean) {
     {
       href: "/briefings",
       title: "Briefings",
-      detail: "An AI-written summary of today's activity, generated at seed time, not hand-written.",
+      detail: "An AI-written summary of the day's activity, regenerated daily by a cron job, not hand-written.",
     },
   ];
 }
@@ -64,6 +64,12 @@ export default async function DashboardPage() {
     db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
     db.ticket.count({ where: { confidence: { lt: 0.5 } } }),
   ]);
+
+  // generateDailyBriefing() is only ever called by prisma/seed.ts (once) or the daily
+  // simulate-day cron, never by an ad-hoc user action elsewhere in the app, so its most recent
+  // createdAt is a clean, honest proxy for "when did the automated refresh last actually run."
+  const lastBriefing = await db.dailyBriefing.findFirst({ orderBy: { createdAt: "desc" } });
+  const lastRunAt = lastBriefing?.createdAt ?? null;
 
   const jobStatusData = JOB_STATUS_ORDER.map((status) => ({
     status,
@@ -125,9 +131,19 @@ export default async function DashboardPage() {
             chase the jobs actually worth following up on.
           </p>
           <p className="mt-2 text-sm font-medium text-foreground">
-            This isn&apos;t a mockup — every number below was generated today, by the same AI and
-            automation code a real deployment would run.
+            This isn&apos;t a mockup — the dates span a simulated month of business, but every
+            classification, automation run, and briefing on it was produced by the app&apos;s real
+            code, not written in by hand.
           </p>
+          {lastRunAt ? (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Last automated run: {formatDateTime(lastRunAt)} — a cron job runs this daily; see{" "}
+              <a href="/about" className="underline underline-offset-2 hover:text-foreground">
+                /about
+              </a>
+              .
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 

@@ -6,7 +6,7 @@ const REPO_URL = "https://github.com/kabxxr7-jpg/opsflow";
 const TLDR = [
   "Reads every incoming customer message and sorts it by urgency automatically, instead of someone having to do that by hand.",
   "Notifies you the moment a completed job is worth following up on — no one has to remember to flag it.",
-  "Everything on this site is real: every number was generated today by the actual AI and automation code, not written in to look good.",
+  "Everything on this site is real: every classification, automation run, and briefing was produced by the actual AI and automation code, refreshed daily by a cron job — not written in to look good.",
   "This proves the automation + AI engine works end to end. Voice agents, multi-agent AI, and multi-user accounts aren't built — the technical sections below explain why, and what a real engagement would add.",
 ];
 
