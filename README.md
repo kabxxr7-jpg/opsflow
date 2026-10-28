@@ -26,6 +26,12 @@ the database, it calls the real classification, automation, and briefing functio
 the same ones a live user triggers by clicking around. What's on `/briefings` and `/tickets` the
 moment you log in is genuinely generated, not hand-authored to look good.
 
+The demo also doesn't go stale. `/api/cron/simulate-day` (`lib/demo-simulation.ts`) runs once
+daily: a couple of fresh tickets through the real classify pipeline, a job or two advanced to
+completed (firing the real webhook rule), a new daily briefing, and old rows pruned so the data
+doesn't grow unbounded. Visit today versus next week and the numbers have actually moved, because
+the same real functions ran again, not because a bigger seed script was written.
+
 ## Architecture
 
 ```
@@ -175,9 +181,14 @@ time with a clear error, not a scattering of unchecked `process.env.X` calls.
    invocations, which `/api/cron/retry-webhooks` checks).
 3. `npx prisma migrate deploy` against the production database, then `npm run db:seed` for
    non-empty demo data.
-4. Deploy. `vercel.json`'s cron schedule runs once daily (`0 3 * * *`), Vercel's Hobby tier
-   rejects any cron expression that would fire more than once per day, same constraint already
-   documented in the companion project, confirmed there by an actual deploy rejection.
+4. Deploy. `vercel.json` defines two cron jobs, both once-daily: `/api/cron/retry-webhooks`
+   sweeps failed webhook deliveries, `/api/cron/simulate-day` keeps the live demo from going
+   stale (creates a few fresh tickets/jobs through the real classify/automation pipeline,
+   advances some jobs to completed, regenerates the daily briefing, prunes old rows). Vercel's
+   Hobby tier rejects any cron expression that would fire more than once per day per job — same
+   constraint as the companion project, confirmed there by an actual deploy rejection — but as of
+   a 2026 Vercel change, Hobby now allows up to 100 distinct cron jobs per project (previously a
+   much lower cap), so running two separate once-daily jobs is fine.
 
 ## Intentionally deferred
 

@@ -11,24 +11,27 @@ import { AutomationOutcomesChart } from "@/components/automation-outcomes-chart"
 const JOB_STATUS_ORDER = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 const RUN_OUTCOME_ORDER = ["SUCCESS", "SKIPPED", "FAILED"];
 
-const START_HERE = [
-  {
-    href: "/tickets",
-    title: "Tickets",
-    detail:
-      "Look for the one marked “needs review” at 40% confidence — that's the grounding safeguard catching a real near-miss, not a staged example.",
-  },
-  {
-    href: "/automations",
-    title: "Automations",
-    detail: "A real run history: matched, skipped by filter, and the webhook it triggered.",
-  },
-  {
-    href: "/briefings",
-    title: "Briefings",
-    detail: "An AI-written summary of today's activity, generated at seed time, not hand-written.",
-  },
-];
+function startHere(hasNeedsReview: boolean) {
+  return [
+    {
+      href: "/tickets",
+      title: "Tickets",
+      detail: hasNeedsReview
+        ? "One ticket is marked “needs review” right now — that's the grounding safeguard catching a real mismatch between the model's claimed quote and the source text, not a staged example."
+        : "Classified by Gemini with a source-grounded quote and confidence score on every ticket. Classification is a real, non-deterministic call each time — when the model's claimed quote doesn't actually match the source, confidence is auto-capped and the ticket flagged, so that badge won't always be present, but the safeguard runs on every single ticket.",
+    },
+    {
+      href: "/automations",
+      title: "Automations",
+      detail: "A real run history: matched, skipped by filter, and the webhook it triggered.",
+    },
+    {
+      href: "/briefings",
+      title: "Briefings",
+      detail: "An AI-written summary of today's activity, generated at seed time, not hand-written.",
+    },
+  ];
+}
 
 type ActivityItem = {
   id: string;
@@ -40,17 +43,27 @@ type ActivityItem = {
 };
 
 export default async function DashboardPage() {
-  const [jobCount, openJobs, ticketCount, ruleCount, recentRuns, recentDeliveries, jobsByStatus, runsByOutcome] =
-    await Promise.all([
-      db.job.count(),
-      db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
-      db.ticket.count(),
-      db.automationRule.count({ where: { isActive: true } }),
-      db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
-      db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
-      db.job.groupBy({ by: ["status"], _count: { _all: true } }),
-      db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
-    ]);
+  const [
+    jobCount,
+    openJobs,
+    ticketCount,
+    ruleCount,
+    recentRuns,
+    recentDeliveries,
+    jobsByStatus,
+    runsByOutcome,
+    needsReviewCount,
+  ] = await Promise.all([
+    db.job.count(),
+    db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
+    db.ticket.count(),
+    db.automationRule.count({ where: { isActive: true } }),
+    db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
+    db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
+    db.job.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.ticket.count({ where: { confidence: { lt: 0.5 } } }),
+  ]);
 
   const jobStatusData = JOB_STATUS_ORDER.map((status) => ({
     status,
@@ -97,7 +110,7 @@ export default async function DashboardPage() {
       <div>
         <h1 className="font-display text-3xl font-medium tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
-          Seeded demo data, mock field-service connector.
+          A simulated scenario, driven by the app&apos;s real automation and AI functions.
         </p>
       </div>
 
@@ -105,6 +118,11 @@ export default async function DashboardPage() {
         <CardContent className="py-5">
           <p className="text-sm text-foreground">
             <span className="font-medium">{SCENARIO.company}</span> — {SCENARIO.description}
+          </p>
+          <p className="mt-2 text-sm text-foreground">
+            Built to replace the two things that eat a small shop&apos;s time most: manually
+            reading and sorting every incoming phone/chat/email message, and remembering to
+            chase the jobs actually worth following up on.
           </p>
           <p className="mt-1.5 text-xs text-muted-foreground">
             Simulated data, real functions: every classification, automation run, and briefing
@@ -121,7 +139,7 @@ export default async function DashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-3">
-          {START_HERE.map((item, i) => (
+          {startHere(needsReviewCount > 0).map((item, i) => (
             <Link
               key={item.href}
               href={item.href}

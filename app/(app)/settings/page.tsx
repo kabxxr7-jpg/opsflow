@@ -47,6 +47,14 @@ export default async function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     Fires on: {hook.triggerOn.map((s) => JOB_STATUS_LABEL[s]).join(", ") || "nothing configured"}
                   </p>
+                  {hook.targetUrl.includes("/api/integrations/test-echo") ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Points at this app&apos;s own signed receiver on purpose — it proves the full
+                      sign → deliver → verify round-trip without depending on a third-party service
+                      staying up. In a real deployment this field points at your CRM, Slack, or
+                      Zapier instead; nothing about the delivery code changes.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <Badge variant={hook.isActive ? "default" : "outline"}>

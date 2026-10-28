@@ -25,7 +25,33 @@ export default async function JobsPage() {
           Simulated field-service jobs, seeded for this demo.
         </p>
       </div>
-      <Card>
+
+      {/* Mobile: a card per job, nothing requires horizontal scrolling to find */}
+      <div className="space-y-3 md:hidden">
+        {jobs.map((job) => (
+          <Card key={job.id}>
+            <CardContent className="space-y-2 py-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-medium">{job.customer.name}</p>
+                  <p className="text-sm text-muted-foreground">{job.jobType}</p>
+                </div>
+                <JobStatusSelect jobId={job.id} status={job.status} />
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{job.technician?.name ?? "Unassigned"}</span>
+                <span>{job.scheduledAt ? formatDate(job.scheduledAt) : "—"}</span>
+                <span className="font-medium text-foreground">
+                  {job.revenue ? `$${job.revenue.toString()}` : "—"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Desktop: a dense table */}
+      <Card className="hidden md:block">
         <CardContent className="p-0">
           <Table>
             <TableHeader>

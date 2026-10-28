@@ -12,6 +12,7 @@ import {
   Settings,
   Workflow,
   LogOut,
+  Info,
 } from "lucide-react";
 import { logout } from "@/app/logout/actions";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ const LINKS = [
   { href: "/automations", label: "Automations", icon: Zap },
   { href: "/briefings", label: "Briefings", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/about", label: "About", icon: Info },
 ];
 
 function useIsActive() {

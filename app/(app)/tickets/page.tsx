@@ -35,6 +35,8 @@ export default async function TicketsPage() {
             ticket.classification !== null &&
             ticket.confidence !== null &&
             ticket.confidence < LOW_CONFIDENCE_THRESHOLD;
+          const groundingMismatch =
+            needsReview && ticket.sourceSnippet !== null && !ticket.rawText.includes(ticket.sourceSnippet);
 
           return (
             <Card key={ticket.id}>
@@ -79,6 +81,14 @@ export default async function TicketsPage() {
                       <p>
                         <span className="font-medium text-foreground">Confidence: </span>
                         {Math.round(ticket.confidence * 100)}%
+                      </p>
+                    ) : null}
+                    {groundingMismatch ? (
+                      <p className="rounded-md bg-accent px-2 py-1.5 text-accent-foreground">
+                        This is the grounding safeguard working, not a bug: the model&apos;s claimed
+                        quote didn&apos;t match the source text exactly, so confidence was
+                        automatically capped and the ticket flagged for a human to check. See{" "}
+                        <code className="font-mono">lib/ai.ts</code>.
                       </p>
                     ) : null}
                   </div>

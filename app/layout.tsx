@@ -20,9 +20,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Opsflow — Field-Service Ops Automation & AI Reporting",
+  title: "Opsflow",
   description:
-    "A mock field-service ops platform demonstrating automation rules, AI-generated daily briefings, and signed webhook delivery.",
+    "Field-service ops automation and AI reporting. The data is a simulated scenario, but every automation run, AI classification, and briefing you'll see is generated live by the app itself, not hand-written.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
