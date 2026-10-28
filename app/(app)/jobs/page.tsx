@@ -18,7 +18,7 @@ export default async function JobsPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-up">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
         <p className="text-sm text-muted-foreground">

@@ -1,9 +1,34 @@
-import { Briefcase, FolderClock, Ticket, Zap } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Briefcase, FolderClock, Search, Ticket, Zap } from "lucide-react";
 import { db } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 import { SCENARIO } from "@/lib/scenario";
+import { JobsByStatusChart } from "@/components/jobs-by-status-chart";
+import { AutomationOutcomesChart } from "@/components/automation-outcomes-chart";
+
+const JOB_STATUS_ORDER = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
+const RUN_OUTCOME_ORDER = ["SUCCESS", "SKIPPED", "FAILED"];
+
+const START_HERE = [
+  {
+    href: "/tickets",
+    title: "Tickets",
+    detail:
+      "Look for the one marked “needs review” at 40% confidence — that's the grounding safeguard catching a real near-miss, not a staged example.",
+  },
+  {
+    href: "/automations",
+    title: "Automations",
+    detail: "A real run history: matched, skipped by filter, and the webhook it triggered.",
+  },
+  {
+    href: "/briefings",
+    title: "Briefings",
+    detail: "An AI-written summary of today's activity, generated at seed time, not hand-written.",
+  },
+];
 
 type ActivityItem = {
   id: string;
@@ -15,14 +40,27 @@ type ActivityItem = {
 };
 
 export default async function DashboardPage() {
-  const [jobCount, openJobs, ticketCount, ruleCount, recentRuns, recentDeliveries] = await Promise.all([
-    db.job.count(),
-    db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
-    db.ticket.count(),
-    db.automationRule.count({ where: { isActive: true } }),
-    db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
-    db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
-  ]);
+  const [jobCount, openJobs, ticketCount, ruleCount, recentRuns, recentDeliveries, jobsByStatus, runsByOutcome] =
+    await Promise.all([
+      db.job.count(),
+      db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
+      db.ticket.count(),
+      db.automationRule.count({ where: { isActive: true } }),
+      db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
+      db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
+      db.job.groupBy({ by: ["status"], _count: { _all: true } }),
+      db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
+    ]);
+
+  const jobStatusData = JOB_STATUS_ORDER.map((status) => ({
+    status,
+    count: jobsByStatus.find((g) => g.status === status)?._count._all ?? 0,
+  })).filter((d) => d.count > 0);
+
+  const runOutcomeData = RUN_OUTCOME_ORDER.map((outcome) => ({
+    outcome,
+    count: runsByOutcome.find((g) => g.status === outcome)?._count._all ?? 0,
+  })).filter((d) => d.count > 0);
 
   const stats = [
     { label: "Total jobs", value: jobCount, icon: Briefcase },
@@ -55,7 +93,7 @@ export default async function DashboardPage() {
     .slice(0, 10);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-up">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
@@ -75,9 +113,36 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-1.5 text-base">
+            <Search className="size-4 text-primary" aria-hidden />
+            New here? Start with these three
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-3">
+          {START_HERE.map((item, i) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="group flex flex-col gap-1 rounded-lg border p-3 transition-colors hover:border-primary/40 hover:bg-primary/5"
+            >
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                  {i + 1}
+                </span>
+                {item.title}
+                <ArrowRight className="size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+              </span>
+              <span className="text-xs text-muted-foreground">{item.detail}</span>
+            </Link>
+          ))}
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {stats.map((stat) => (
-          <Card key={stat.label}>
+          <Card key={stat.label} className="transition-shadow hover:shadow-md">
             <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {stat.label}
@@ -89,6 +154,36 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Jobs by status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {jobStatusData.length > 0 ? (
+              <JobsByStatusChart data={jobStatusData} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No jobs yet.</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Automation run outcomes</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Every evaluation gets logged, matched or not.
+            </p>
+          </CardHeader>
+          <CardContent>
+            {runOutcomeData.length > 0 ? (
+              <AutomationOutcomesChart data={runOutcomeData} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No automation runs yet.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <Card>

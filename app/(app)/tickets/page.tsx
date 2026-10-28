@@ -18,7 +18,7 @@ export default async function TicketsPage() {
   const tickets = await db.ticket.findMany({ orderBy: { createdAt: "desc" } });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-up">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Tickets</h1>

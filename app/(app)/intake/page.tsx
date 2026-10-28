@@ -14,7 +14,7 @@ export default async function IntakePage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-up">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Document intake</h1>
         <p className="text-sm text-muted-foreground">
