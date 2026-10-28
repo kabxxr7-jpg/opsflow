@@ -16,6 +16,16 @@ claim vendor experience that doesn't exist.
 *Full technical writeup below, including the HMAC scheme, the AI validation discipline, and the
 skills-to-features map. Skip ahead if you just want to see it work.*
 
+## The scenario
+
+The demo is staged around **Riverside Home Services**, a fictional 3-person HVAC/electrical/
+plumbing outfit. Tickets arrive by phone, chat, and email; Opsflow triages and prioritizes them,
+dispatches technicians, and notifies the owner by webhook when a completed job clears $500. The
+company is the only fictional part — `prisma/seed.ts` doesn't write placeholder "AI output" into
+the database, it calls the real classification, automation, and briefing functions at seed time,
+the same ones a live user triggers by clicking around. What's on `/briefings` and `/tickets` the
+moment you log in is genuinely generated, not hand-authored to look good.
+
 ## Architecture
 
 ```
