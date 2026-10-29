@@ -7,6 +7,8 @@ export class OCRError extends Error {
   }
 }
 
+const OCR_TIMEOUT_MS = 45_000;
+
 export interface OCRResult {
   text: string;
   confidence: number; // normalized 0-1, Tesseract reports 0-100
@@ -20,18 +22,33 @@ export interface OCRResult {
  * doesn't change.
  */
 export async function extractTextFromImage(imageBuffer: Buffer): Promise<OCRResult> {
-  const worker = await createWorker("eng");
-  try {
+  let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const recognise = async (): Promise<OCRResult> => {
+    worker = await createWorker("eng");
     const result = await worker.recognize(imageBuffer);
     const text = result.data.text.trim();
     if (!text) {
       throw new OCRError("No text could be extracted from this image.");
     }
-    return {
-      text,
-      confidence: result.data.confidence / 100,
-    };
+    return { text, confidence: result.data.confidence / 100 };
+  };
+
+  // A worker that fails to start (or hangs downloading its language data) would otherwise leave
+  // the request open until the platform kills it, with the person staring at a spinner. Fail with
+  // a message instead.
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new OCRError("Reading the image took too long. Try a smaller or clearer photo.")),
+      OCR_TIMEOUT_MS
+    );
+  });
+
+  try {
+    return await Promise.race([recognise(), timeout]);
   } finally {
-    await worker.terminate();
+    clearTimeout(timer);
+    await worker?.terminate().catch(() => {});
   }
 }
