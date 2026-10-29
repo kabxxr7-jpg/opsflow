@@ -4,10 +4,15 @@ import { env } from "@/lib/env";
 import { verifySignature } from "@/lib/webhooks";
 import { rawDb, getOrgDb } from "@/lib/db";
 import { runAutomations } from "@/lib/automations";
+import { LIMITS } from "@/lib/rule-fields";
 
+const MAX_BODY_BYTES = 64 * 1024;
+
+// Bounded to match what the app itself will accept for a ticket: this is a signed endpoint, but
+// whoever holds the secret (or a compromised workflow) shouldn't be able to store unbounded text.
 const bodySchema = z.object({
-  rawText: z.string().min(1),
-  source: z.string().default("n8n"),
+  rawText: z.string().trim().min(1).max(LIMITS.ticketText),
+  source: z.string().trim().min(1).max(40).default("n8n"),
   classification: z.enum([
     "billing",
     "scheduling",
@@ -19,9 +24,9 @@ const bodySchema = z.object({
     "other",
   ]),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]),
-  summary: z.string(),
+  summary: z.string().max(2000),
   confidence: z.number().min(0).max(1),
-  sourceSnippet: z.string(),
+  sourceSnippet: z.string().max(2000),
 });
 
 /**
@@ -33,6 +38,9 @@ const bodySchema = z.object({
  */
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
+  if (rawBody.length > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+  }
   const timestamp = request.headers.get("X-Webhook-Timestamp");
   const signature = request.headers.get("X-Webhook-Signature");
 

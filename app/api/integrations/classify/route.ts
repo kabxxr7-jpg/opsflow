@@ -3,9 +3,14 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { verifySignature } from "@/lib/webhooks";
 import { classifyTicket, AIError } from "@/lib/ai";
+import { LIMITS } from "@/lib/rule-fields";
+
+// Same ceiling the in-app "new ticket" form enforces, so this endpoint can't be used to push
+// arbitrarily large text at the (metered) model.
+const MAX_BODY_BYTES = 64 * 1024;
 
 const bodySchema = z.object({
-  rawText: z.string().min(1),
+  rawText: z.string().trim().min(1).max(LIMITS.ticketText),
 });
 
 /**
@@ -15,6 +20,9 @@ const bodySchema = z.object({
  */
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
+  if (rawBody.length > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+  }
   const timestamp = request.headers.get("X-Webhook-Timestamp");
   const signature = request.headers.get("X-Webhook-Signature");
 
@@ -30,7 +38,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid or missing signature." }, { status: 401 });
   }
 
-  const parsedBody = bodySchema.safeParse(JSON.parse(rawBody));
+  // A correctly signed body can still be something other than JSON; that's a 400, not a crash.
+  let json: unknown;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "Body is not valid JSON." }, { status: 400 });
+  }
+
+  const parsedBody = bodySchema.safeParse(json);
   if (!parsedBody.success) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
