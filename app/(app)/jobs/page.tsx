@@ -1,9 +1,10 @@
+import type { Metadata } from "next";
 import { Briefcase } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { JobStatusSelect } from "@/components/job-status-select";
-import { formatDate, cn } from "@/lib/utils";
+import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -21,16 +22,14 @@ const STATUS_BORDER: Record<JobStatus, string> = {
   CANCELLED: "border-l-[var(--chart-5)]",
 };
 
-const AVATAR_COLORS = [
-  "bg-[var(--chart-1)]",
-  "bg-[var(--chart-2)]",
-  "bg-[var(--chart-3)]",
-  "bg-[var(--chart-4)]",
-];
+// Deliberately not the chart palette: white initials on those fills fall below 4.5:1. These are
+// all >= 5:1 against white, in both themes.
+const AVATAR_COLORS = ["bg-sky-700", "bg-emerald-700", "bg-amber-700", "bg-violet-700"];
 
 function initials(name: string) {
   return name
-    .split(" ")
+    .split(/\s+/)
+    .filter(Boolean)
     .map((p) => p[0])
     .slice(0, 2)
     .join("")
@@ -45,13 +44,17 @@ function avatarColor(name: string) {
 function TechAvatar({ name }: { name: string | null | undefined }) {
   if (!name) {
     return (
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+      <span
+        aria-hidden
+        className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground"
+      >
         —
       </span>
     );
   }
   return (
     <span
+      aria-hidden
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium text-white",
         avatarColor(name)
@@ -61,6 +64,8 @@ function TechAvatar({ name }: { name: string | null | undefined }) {
     </span>
   );
 }
+
+export const metadata: Metadata = { title: "Jobs" };
 
 export default async function JobsPage() {
   const session = await getSession();
@@ -73,7 +78,7 @@ export default async function JobsPage() {
   const jobs = await db.job.findMany({
     where: session.role === "TECHNICIAN" ? { assignedToId: session.userId } : undefined,
     include: { customer: true, technician: true },
-    orderBy: { scheduledAt: "desc" },
+    orderBy: { scheduledAt: { sort: "desc", nulls: "last" } },
   });
 
   return (
@@ -103,13 +108,18 @@ export default async function JobsPage() {
                     <p className="text-sm text-muted-foreground">{job.jobType}</p>
                   </div>
                 </div>
-                <JobStatusSelect jobId={job.id} status={job.status} />
+                <JobStatusSelect
+                  jobId={job.id}
+                  status={job.status}
+                  revenue={job.revenue?.toString() ?? null}
+                  label={`${job.customer.name} — ${job.jobType}`}
+                />
               </div>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{job.technician?.name ?? "Unassigned"}</span>
                 <span>{job.scheduledAt ? formatDate(job.scheduledAt) : "—"}</span>
                 <span className="text-sm font-semibold text-foreground">
-                  {job.revenue ? `$${job.revenue.toString()}` : "—"}
+                  {job.revenue ? formatCurrency(job.revenue) : "—"}
                 </span>
               </div>
             </CardContent>
@@ -143,13 +153,18 @@ export default async function JobsPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <JobStatusSelect jobId={job.id} status={job.status} />
+                    <JobStatusSelect
+                  jobId={job.id}
+                  status={job.status}
+                  revenue={job.revenue?.toString() ?? null}
+                  label={`${job.customer.name} — ${job.jobType}`}
+                />
                   </TableCell>
                   <TableCell>
                     {job.scheduledAt ? formatDate(job.scheduledAt) : "—"}
                   </TableCell>
                   <TableCell className="text-right font-semibold">
-                    {job.revenue ? `$${job.revenue.toString()}` : "—"}
+                    {job.revenue ? formatCurrency(job.revenue) : "—"}
                   </TableCell>
                 </TableRow>
               ))}

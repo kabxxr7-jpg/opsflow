@@ -1,9 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getScopedDb } from "@/lib/db";
+import { getScopedDb, type ScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import { runAutomations } from "@/lib/automations";
 import { classifyTicket, AIError } from "@/lib/ai";
+import { fail, OK, toActionError, type ActionResult } from "@/lib/action-result";
+import { parseInput, ticketInputSchema } from "@/lib/validation";
+import { assertTicketCreationAllowed } from "@/lib/throttle";
 
 function revalidateTickets() {
   revalidatePath("/tickets");
@@ -11,40 +15,15 @@ function revalidateTickets() {
   revalidatePath("/automations");
 }
 
-export async function createTicket(formData: FormData) {
-  const rawText = String(formData.get("rawText") ?? "").trim();
-  const source = String(formData.get("source") ?? "chat");
-  const jobId = String(formData.get("jobId") ?? "");
-
-  if (!rawText) {
-    return { error: "Ticket text is required." };
-  }
-
-  const db = await getScopedDb();
-  const ticket = await db.ticket.create({
-    data: {
-      rawText,
-      source,
-      jobId: jobId || null,
-      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
-    },
-  });
-
-  await runAutomations(db, { type: "ticket.created", ticket });
-  revalidateTickets();
-
-  // Classification happens after the ticket already exists and the creation-time automation
-  // run is logged, so a slow or failed Gemini call never blocks ticket creation itself.
-  await classifyTicketById(ticket.id);
-
-  return { error: null };
-}
-
-export async function classifyTicketById(ticketId: string): Promise<{ error: string | null }> {
-  const db = await getScopedDb();
+async function classifyAndSave(db: ScopedDb, ticketId: string): Promise<ActionResult> {
   const ticket = await db.ticket.findUnique({ where: { id: ticketId } });
   if (!ticket) {
-    return { error: "Ticket not found." };
+    return fail("Ticket not found.");
+  }
+  // One classification per ticket: the button is only offered for unclassified tickets, and
+  // refusing a repeat here means a direct call can't be used to re-run the model endlessly.
+  if (ticket.classification !== null) {
+    return fail("This ticket has already been classified.");
   }
 
   try {
@@ -65,12 +44,62 @@ export async function classifyTicketById(ticketId: string): Promise<{ error: str
     await runAutomations(db, { type: "ticket.created", ticket: updated });
 
     revalidateTickets();
-    return { error: null };
+    return OK;
   } catch (err) {
     if (err instanceof AIError) {
-      return { error: err.message };
+      return fail(err.message);
     }
     console.error("classifyTicketById: unexpected error", err);
-    return { error: "Unexpected error classifying this ticket." };
+    return fail("Unexpected error classifying this ticket.");
+  }
+}
+
+export async function createTicket(formData: FormData): Promise<ActionResult> {
+  try {
+    const session = await getSession();
+    if (!session) return fail("Your session expired. Sign in again.");
+    const db = await getScopedDb();
+
+    const input = parseInput(ticketInputSchema, {
+      rawText: String(formData.get("rawText") ?? ""),
+      source: String(formData.get("source") ?? "chat"),
+      jobId: String(formData.get("jobId") ?? "") || undefined,
+    });
+    await assertTicketCreationAllowed(db);
+
+    if (input.jobId && !(await db.job.findUnique({ where: { id: input.jobId } }))) {
+      return fail("That job wasn't found.");
+    }
+
+    const ticket = await db.ticket.create({
+      data: {
+        rawText: input.rawText,
+        source: input.source,
+        jobId: input.jobId ?? null,
+        organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
+      },
+    });
+
+    await runAutomations(db, { type: "ticket.created", ticket });
+    revalidateTickets();
+
+    // Classification happens after the ticket already exists and the creation-time automation
+    // run is logged, so a slow or failed Gemini call never blocks ticket creation itself.
+    await classifyAndSave(db, ticket.id);
+
+    return OK;
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function classifyTicketById(ticketId: string): Promise<ActionResult> {
+  try {
+    const session = await getSession();
+    if (!session) return fail("Your session expired. Sign in again.");
+    const db = await getScopedDb();
+    return await classifyAndSave(db, String(ticketId).slice(0, 64));
+  } catch (err) {
+    return toActionError(err);
   }
 }

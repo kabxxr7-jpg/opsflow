@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { Suspense, useActionState, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Workflow, Bell, Inbox, History, Code2, Info } from "lucide-react";
 import { login } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -34,16 +36,30 @@ const DEMO_ACCOUNTS = [
 ];
 const DEMO_PASSWORD = "opsflow-demo-2026";
 
+// Where the proxy bounced the visitor from, so signing in lands them back there. Read inside its
+// own Suspense boundary because useSearchParams opts its subtree out of static rendering.
+function ReturnToField() {
+  const from = useSearchParams().get("from");
+  return from ? <input type="hidden" name="from" value={from} /> : null;
+}
+
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState(login, undefined);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  // Focus the email field on desktop only: on a phone, autofocus raises the keyboard over the
+  // sign-in button and the demo accounts before anyone has seen the page.
+  useEffect(() => {
+    if (window.matchMedia("(pointer: fine)").matches) emailRef.current?.focus();
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       {/* Brand panel — desktop only. Deliberately not theme-reactive (stays this gradient in
           light and dark site mode) so it reads as a fixed brand moment, not a themed surface. */}
-      <div className="relative hidden overflow-hidden bg-gradient-to-br from-[oklch(0.3_0.13_262)] via-[oklch(0.42_0.16_262)] to-[oklch(0.27_0.11_250)] px-10 py-12 text-primary-foreground md:flex md:w-[44%] md:flex-col md:justify-between lg:w-[42%] lg:px-14 lg:py-16 xl:w-[38%]">
+      <aside className="relative hidden overflow-hidden bg-gradient-to-br from-[oklch(0.3_0.13_262)] via-[oklch(0.42_0.16_262)] to-[oklch(0.27_0.11_250)] px-10 py-12 text-primary-foreground md:flex md:w-[44%] md:flex-col md:justify-between lg:w-[42%] lg:px-14 lg:py-16 xl:w-[38%]">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.12]"
@@ -66,7 +82,7 @@ export default function LoginPage() {
               <br />
               actually under control.
             </h1>
-            <p className="text-sm leading-relaxed text-primary-foreground/70">
+            <p className="text-sm leading-relaxed text-primary-foreground/85">
               Staged around <span className="font-medium text-primary-foreground">{SCENARIO.company}</span>,{" "}
               {SCENARIO.description}
             </p>
@@ -74,14 +90,14 @@ export default function LoginPage() {
 
           <div className="grid max-w-md grid-cols-2 gap-3">
             <div className="rounded-xl border border-white/15 bg-white/[0.07] p-3 backdrop-blur-sm">
-              <p className="mb-2 text-xs font-medium text-primary-foreground/60">Before</p>
+              <p className="mb-2 text-xs font-medium text-primary-foreground/80">Before</p>
               <div className="space-y-1.5">
                 <div className="h-2 w-full rounded bg-white/15" />
                 <div className="h-2 w-5/6 rounded bg-white/15" />
                 <div className="h-2 w-full rounded bg-white/15" />
                 <div className="h-2 w-4/6 rounded bg-white/15" />
               </div>
-              <p className="mt-2.5 text-xs text-primary-foreground/60">
+              <p className="mt-2.5 text-xs text-primary-foreground/80">
                 12 unread messages, no priority, nobody&apos;s watching for the big one.
               </p>
             </div>
@@ -109,7 +125,7 @@ export default function LoginPage() {
 
           <ul className="max-w-md space-y-3">
             {PITCH_POINTS.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-start gap-2.5 text-sm text-primary-foreground/75">
+              <li key={text} className="flex items-start gap-2.5 text-sm text-primary-foreground/85">
                 <Icon className="mt-0.5 size-4 shrink-0 text-primary-foreground/90" aria-hidden />
                 {text}
               </li>
@@ -119,15 +135,15 @@ export default function LoginPage() {
 
         <p className="relative max-w-md text-sm font-medium text-primary-foreground/90">
           This isn&apos;t a mockup — real accounts, real roles, real org-scoped data isolation (see{" "}
-          <a href="/about" className="underline underline-offset-2 hover:text-white">
+          <Link href="/about" className="underline underline-offset-2 hover:text-white">
             /about
-          </a>
+          </Link>
           ).
         </p>
-      </div>
+      </aside>
 
       {/* Form panel */}
-      <div className="flex flex-1 items-center justify-center bg-background px-6 py-12">
+      <main className="flex flex-1 items-center justify-center bg-background px-6 py-12">
         <div className="animate-fade-up w-full max-w-sm space-y-7">
           <div className="flex items-center gap-2.5 md:hidden">
             <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -137,7 +153,9 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1.5">
-            <h2 className="font-display text-2xl font-medium tracking-tight">Sign in</h2>
+            {/* The brand panel's h1 is hidden on small screens, so the form needs its own there. */}
+            <h1 className="font-display text-2xl font-medium tracking-tight md:hidden">Sign in</h1>
+            <h2 className="hidden font-display text-2xl font-medium tracking-tight md:block">Sign in</h2>
             <p className="text-sm text-muted-foreground">Field-service ops automation + AI reporting demo.</p>
           </div>
 
@@ -151,7 +169,7 @@ export default function LoginPage() {
                   setEmail(acct.email);
                   setPassword(DEMO_PASSWORD);
                 }}
-                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-background"
+                className="flex min-h-10 w-full flex-wrap items-center justify-between gap-x-3 rounded-lg px-2 py-2 text-left text-xs transition-colors hover:bg-background"
               >
                 <span>
                   <span className="font-medium text-foreground">{acct.role}</span>{" "}
@@ -167,6 +185,9 @@ export default function LoginPage() {
           </div>
 
           <form action={formAction} className="space-y-4">
+            <Suspense fallback={null}>
+              <ReturnToField />
+            </Suspense>
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -174,7 +195,10 @@ export default function LoginPage() {
                 name="email"
                 type="email"
                 required
-                autoFocus
+                ref={emailRef}
+                autoComplete="username"
+                inputMode="email"
+                spellCheck={false}
                 className="h-10"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -187,34 +211,35 @@ export default function LoginPage() {
                 name="password"
                 type="password"
                 required
+                autoComplete="current-password"
                 className="h-10"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            {state?.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+            {state?.error ? <p role="alert" className="text-sm text-destructive-text">{state.error}</p> : null}
             <Button type="submit" size="lg" className="h-10 w-full" disabled={pending}>
-              {pending ? "Signing in..." : "Sign in"}
+              {pending ? "Signing in…" : "Sign in"}
             </Button>
           </form>
 
           <div className="flex items-center justify-center gap-4 border-t pt-5 text-xs text-muted-foreground">
-            <a href="/about" className="inline-flex items-center gap-1.5 hover:text-foreground">
+            <Link href="/about" className="inline-flex min-h-8 items-center gap-1.5 hover:text-foreground">
               <Info className="size-3.5" aria-hidden />
               What is this?
-            </a>
+            </Link>
             <a
               href={REPO_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 hover:text-foreground"
+              className="inline-flex min-h-8 items-center gap-1.5 hover:text-foreground"
             >
               <Code2 className="size-3.5" aria-hidden />
               Source on GitHub
             </a>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

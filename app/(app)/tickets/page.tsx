@@ -1,5 +1,9 @@
+import type { Metadata } from "next";
 import { Ticket as TicketIcon, Eye } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { can } from "@/lib/authz";
+import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,9 +21,16 @@ const PRIORITY_VARIANT: Record<string, "default" | "secondary" | "destructive" |
 
 const LOW_CONFIDENCE_THRESHOLD = 0.5;
 
+// Server Actions used on this page (OCR, AI calls) inherit this ceiling instead of the platform default.
+export const maxDuration = 60;
+
+export const metadata: Metadata = { title: "Tickets" };
+
 export default async function TicketsPage() {
+  const session = await getSession();
   const db = await getScopedDb();
-  const tickets = await db.ticket.findMany({ orderBy: { createdAt: "desc" } });
+  const showAutomationsLink = session ? can(session.role, "view:automations") : false;
+  const tickets = await db.ticket.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -36,6 +47,13 @@ export default async function TicketsPage() {
         </div>
         <NewTicketDialog />
       </div>
+      {tickets.length === 0 ? (
+        <Card>
+          <CardContent>
+            <EmptyState message="No tickets yet. Create one, or upload a photo on the Intake page." />
+          </CardContent>
+        </Card>
+      ) : null}
       <div className="space-y-3">
         {tickets.map((ticket) => {
           const needsReview =
@@ -68,9 +86,10 @@ export default async function TicketsPage() {
                         {needsReview ? <Badge variant="destructive">needs review</Badge> : null}
                         <TicketDetailSheet
                           ticket={ticket}
+                          showAutomationsLink={showAutomationsLink}
                           trigger={
-                            <Button type="button" variant="ghost" size="icon-sm" aria-label="View details">
-                              <Eye className="size-3.5" />
+                            <Button type="button" variant="ghost" size="icon-sm" aria-label={`View details for ticket from ${ticket.source}, ${formatDate(ticket.createdAt)}`}>
+                              <Eye className="size-3.5" aria-hidden />
                             </Button>
                           }
                         />

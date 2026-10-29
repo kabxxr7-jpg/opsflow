@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
+import http from "node:http";
+import https from "node:https";
 import type { JobStatus, Prisma } from "@prisma/client";
 import type { ScopedDb } from "@/lib/db";
+import { parseWebhookTarget, safeLookup } from "@/lib/safe-url";
 
 export interface JobStatusChangeEvent {
   jobId: string;
@@ -57,6 +60,47 @@ function nextRetryDelayMs(failedAttemptNumber: number): number | null {
   return null;
 }
 
+const DELIVERY_TIMEOUT_MS = 5000;
+const MAX_RESPONSE_BYTES = 4096;
+
+/**
+ * One POST over node's http(s) rather than fetch, for two reasons that both matter for an
+ * outbound request to a user-supplied address: `lookup: safeLookup` validates the resolved IPs at
+ * connect time (see lib/safe-url.ts), and http(s).request never follows redirects, so a
+ * "public" URL can't bounce the request somewhere internal. The response body is capped — we
+ * only keep a snippet for the delivery log, and a hostile endpoint shouldn't be able to make us
+ * buffer an arbitrary amount of it.
+ */
+function postJson(target: URL, headers: Record<string, string>, body: string): Promise<{ statusCode: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const transport = target.protocol === "https:" ? https : http;
+    const req = transport.request(
+      target,
+      {
+        method: "POST",
+        headers: { ...headers, "Content-Length": String(Buffer.byteLength(body)) },
+        lookup: safeLookup,
+        timeout: DELIVERY_TIMEOUT_MS,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let received = 0;
+        res.on("data", (chunk: Buffer) => {
+          if (received < MAX_RESPONSE_BYTES) chunks.push(chunk);
+          received += chunk.length;
+        });
+        res.on("end", () =>
+          resolve({ statusCode: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8").slice(0, 2000) })
+        );
+        res.on("error", reject);
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error(`Timed out after ${DELIVERY_TIMEOUT_MS / 1000}s`)));
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
 export async function deliverWebhook(
   db: ScopedDb,
   params: {
@@ -79,26 +123,38 @@ export async function deliverWebhook(
   let responseBody: string | null = null;
   let success = false;
   let errorMessage: string | null = null;
+  // A target that fails the safety checks is never retried — retrying can't make it safe.
+  let retryable = true;
 
   try {
-    const res = await fetch(targetUrl, {
-      method: "POST",
-      headers: {
+    // Re-validated on every attempt, not just when the endpoint was saved: a config written
+    // before these checks existed, or edited directly in the database, gets no free pass.
+    let target: URL;
+    try {
+      target = parseWebhookTarget(targetUrl);
+    } catch (err) {
+      retryable = false;
+      throw err;
+    }
+    const res = await postJson(
+      target,
+      {
         "Content-Type": "application/json",
+        "User-Agent": "Opsflow-Webhooks/1.0",
         "X-Webhook-Signature": `sha256=${signature}`,
         "X-Webhook-Timestamp": timestamp,
+        "X-Webhook-Event": eventType,
       },
-      body,
-      signal: AbortSignal.timeout(5000),
-    });
-    statusCode = res.status;
-    const text = await res.text();
-    responseBody = text.slice(0, 2000);
-    success = res.ok;
+      body
+    );
+    statusCode = res.statusCode;
+    responseBody = res.text;
+    success = statusCode >= 200 && statusCode < 300;
     if (!success) {
-      errorMessage = `Non-2xx response: ${res.status}`;
+      errorMessage = `Non-2xx response: ${statusCode}`;
     }
   } catch (err) {
+    if ((err as Error)?.name === "UnsafeUrlError") retryable = false;
     errorMessage = err instanceof Error ? err.message : "Unknown delivery error";
   }
 
@@ -118,7 +174,7 @@ export async function deliverWebhook(
       errorMessage,
       durationMs,
       nextRetryAt: (() => {
-        if (success) return null;
+        if (success || !retryable) return null;
         const delay = nextRetryDelayMs(attemptNumber);
         return delay != null ? new Date(Date.now() + delay) : null;
       })(),
@@ -142,6 +198,17 @@ export async function retryFailedDeliveries(db: ScopedDb): Promise<{ attempted: 
   let attempted = 0;
   for (const delivery of due) {
     if (!delivery.webhookConfig.isActive) continue;
+
+    // Claim the row before retrying it. The failed attempt stays in the log as history, but it
+    // must stop being "due": otherwise every later sweep would pick it up again and re-send an
+    // event that a subsequent attempt already delivered. Matching on the nextRetryAt we read also
+    // means two overlapping sweeps can't both claim the same row.
+    const claimed = await db.webhookDelivery.updateMany({
+      where: { id: delivery.id, nextRetryAt: delivery.nextRetryAt },
+      data: { nextRetryAt: null },
+    });
+    if (claimed.count === 0) continue;
+
     attempted += 1;
     await deliverWebhook(db, {
       webhookConfigId: delivery.webhookConfigId,

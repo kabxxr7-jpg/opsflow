@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 import { Sun, Moon, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,13 @@ import { cn } from "@/lib/utils";
 const CYCLE = ["light", "dark", "system"] as const;
 const ICONS = { light: Sun, dark: Moon, system: Monitor } as const;
 
+const subscribeNever = () => () => {};
+
 export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   // Avoids a hydration mismatch: the server has no way to know the client's stored
-  // preference, so the icon only reflects the real theme once mounted client-side.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // preference, so the icon only reflects the real theme once hydrated on the client.
+  const mounted = useSyncExternalStore(subscribeNever, () => true, () => false);
 
   const current = (mounted ? theme : "system") as (typeof CYCLE)[number];
   const Icon = ICONS[current] ?? Monitor;

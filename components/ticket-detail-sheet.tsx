@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
+import Link from "next/link";
 import type { Ticket } from "@prisma/client";
 import { Zap } from "lucide-react";
 import {
@@ -37,9 +38,12 @@ function highlightSnippet(rawText: string, snippet: string | null) {
 export function TicketDetailSheet({
   ticket,
   trigger,
+  showAutomationsLink,
 }: {
   ticket: Ticket;
   trigger: React.ReactElement;
+  /** Only owners can open /automations; everyone else would just hit a dead end. */
+  showAutomationsLink: boolean;
 }) {
   return (
     <Dialog>
@@ -48,7 +52,7 @@ export function TicketDetailSheet({
         <DialogTitle className="flex items-center gap-2">
           via {ticket.source} · {formatDateTime(ticket.createdAt)}
         </DialogTitle>
-        <div id="ticket-detail-description" className="space-y-4 text-sm">
+        <div className="space-y-4 text-sm">
             <div className="flex flex-wrap items-center gap-1.5">
               {ticket.classification ? (
                 <Badge>{ticket.classification.replace(/_/g, " ")}</Badge>
@@ -103,11 +107,18 @@ export function TicketDetailSheet({
                 Automation
               </p>
               <p className="text-xs text-muted-foreground">
-                This ticket&apos;s creation ran against every active rule on{" "}
-                <a href="/automations" className="underline underline-offset-2 hover:text-foreground">
-                  /automations
-                </a>{" "}
-                — check the run history there for exactly what matched.
+                This ticket&apos;s creation ran against every active automation rule
+                {showAutomationsLink ? (
+                  <>
+                    {" "}— see{" "}
+                    <Link href="/automations" className="underline underline-offset-2 hover:text-foreground">
+                      Automations
+                    </Link>{" "}
+                    for exactly what matched.
+                  </>
+                ) : (
+                  "."
+                )}
               </p>
             </div>
         </div>

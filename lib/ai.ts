@@ -2,6 +2,7 @@ import { GoogleGenAI, ApiError } from "@google/genai";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import type { ScopedDb } from "@/lib/db";
+import { briefingWindow } from "@/lib/briefing-stats";
 
 const globalForGemini = globalThis as unknown as { gemini: GoogleGenAI | undefined };
 
@@ -169,62 +170,48 @@ const dailyBriefingJsonSchema = z.toJSONSchema(dailyBriefingSchema);
 
 function buildBriefingPrompt(
   tickets: { id: string; rawText: string; classification: string | null; priority: string | null }[],
-  jobStats: { total: number; completed: number; revenue: number }
+  correction?: string
 ): string {
   const ticketLines = tickets
     .map((t) => `- [id: ${t.id}] (${t.classification ?? "unclassified"}, ${t.priority ?? "no priority"}) ${t.rawText}`)
     .join("\n");
 
   return [
-    "You are writing a short daily management briefing for the owner of a home-service business, based on today's customer tickets and job activity.",
-    "Write a concise narrative summary, then extract specific highlights: opportunities (e.g. upsell potential, a recurring complaint pattern), risks (e.g. a customer likely to churn), follow-ups needed, or praise worth passing to a technician.",
-    "Every highlight's sourceTicketId must be one of the exact ticket ids listed below, or null if the highlight is about overall job activity rather than a specific ticket. Do not invent ticket ids.",
+    "You are writing a short management briefing for the owner of a home-service business, based on the customer tickets that came in over the last 24 hours.",
+    "Write a concise narrative summary of what came in and what needs attention, then extract specific highlights: opportunities (e.g. upsell potential, a recurring complaint pattern), risks (e.g. a customer likely to churn), follow-ups needed, or praise worth passing to a technician.",
+    "The app already shows exact job counts and revenue next to your summary, computed from the database. So the narrative must NOT state any dollar amounts or numbers of jobs — describe themes, urgency, and what to do about them in words.",
+    "Every highlight's sourceTicketId must be one of the exact ticket ids listed below, or null if the highlight is about overall activity rather than a specific ticket. Do not invent ticket ids.",
     "Be honest about confidence — if you're inferring something not clearly stated, use a lower score.",
-    "",
-    `Jobs today: ${jobStats.total} total, ${jobStats.completed} completed, $${jobStats.revenue.toFixed(2)} revenue.`,
+    ...(correction ? ["", `Correction: ${correction}`] : []),
     "",
     "Tickets:",
-    ticketLines || "(no tickets today)",
+    ticketLines || "(no tickets in this period)",
   ].join("\n");
 }
 
-/**
- * Reads today's tickets and job stats, asks Gemini for a narrative summary plus cited
- * highlights, validates the result, and persists it as a DailyBriefing row.
- */
-export async function generateDailyBriefing(db: ScopedDb): Promise<DailyBriefingResult> {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+// The narrative is not allowed to carry figures (see the prompt): the only job counts and revenue
+// on screen are the ones computed from the database. This is the check behind that instruction —
+// a model told "don't state numbers" will still occasionally do it, and "18 jobs completed" next
+// to a header saying 2 is precisely the failure mode a hallucination-safeguards project can't ship.
+const FIGURE_IN_NARRATIVE = /\$\s?\d|\b\d[\d,]*(?:\.\d+)?\s+(?:total\s+|new\s+|open\s+)?(?:jobs?|work orders?)\b/i;
 
-  const [tickets, jobs] = await Promise.all([
-    db.ticket.findMany({
-      where: { createdAt: { gte: startOfDay } },
-      select: { id: true, rawText: true, classification: true, priority: true },
-      orderBy: { createdAt: "desc" },
-    }),
-    db.job.findMany({
-      where: { OR: [{ createdAt: { gte: startOfDay } }, { completedAt: { gte: startOfDay } }] },
-    }),
-  ]);
+export function findInventedFigure(summary: string): string | null {
+  const m = summary.match(FIGURE_IN_NARRATIVE);
+  return m ? m[0] : null;
+}
 
-  const jobStats = {
-    total: jobs.length,
-    completed: jobs.filter((j) => j.status === "COMPLETED").length,
-    revenue: jobs.reduce((sum, j) => sum + Number(j.revenue ?? 0), 0),
-  };
+/** Drops any sentence containing a figure; used only if the model repeats the mistake after a retry. */
+export function stripFigureSentences(summary: string): string {
+  const kept = summary.split(/(?<=[.!?])\s+/).filter((sentence) => !FIGURE_IN_NARRATIVE.test(sentence));
+  return kept.join(" ").trim();
+}
 
-  let client: GoogleGenAI;
-  try {
-    client = getClient();
-  } catch {
-    throw new AIError("GEMINI_API_KEY is not set. Add it to .env to enable the daily briefing.", "not_configured");
-  }
-
+async function requestBriefing(client: GoogleGenAI, prompt: string): Promise<DailyBriefingResult> {
   let rawOutput: string | undefined;
   try {
     const response = await client.models.generateContent({
       model: MODEL,
-      contents: buildBriefingPrompt(tickets, jobStats),
+      contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseJsonSchema: dailyBriefingJsonSchema,
@@ -252,19 +239,64 @@ export async function generateDailyBriefing(db: ScopedDb): Promise<DailyBriefing
     console.error("Daily briefing: structured output failed schema validation:", result.error.message);
     throw new AIError("Gemini's response didn't match the expected format. This has been logged.", "invalid_output");
   }
+  return result.data;
+}
+
+/**
+ * Reads the last 24 hours of tickets, asks Gemini for a narrative summary plus cited highlights,
+ * validates the result, and persists it as a DailyBriefing row. Job counts and revenue are *not*
+ * the model's to report — the briefings page renders them straight from the database using the
+ * same window (lib/briefing-stats.ts), so the narrative and the numbers can't disagree.
+ */
+export async function generateDailyBriefing(db: ScopedDb): Promise<DailyBriefingResult> {
+  const at = new Date();
+  const { start } = briefingWindow(at);
+
+  const tickets = await db.ticket.findMany({
+    where: { createdAt: { gte: start, lte: at } },
+    select: { id: true, rawText: true, classification: true, priority: true },
+    orderBy: { createdAt: "desc" },
+    take: 40,
+  });
+
+  let client: GoogleGenAI;
+  try {
+    client = getClient();
+  } catch {
+    throw new AIError("GEMINI_API_KEY is not set. Add it to .env to enable the daily briefing.", "not_configured");
+  }
+
+  let result = await requestBriefing(client, buildBriefingPrompt(tickets));
+  let invented = findInventedFigure(result.summary);
+  if (invented) {
+    console.warn(`Daily briefing: narrative stated a figure ("${invented}"); retrying once with a correction.`);
+    result = await requestBriefing(
+      client,
+      buildBriefingPrompt(
+        tickets,
+        `your previous summary stated "${invented}". Rewrite it without any dollar amounts or job counts.`
+      )
+    );
+    invented = findInventedFigure(result.summary);
+    if (invented) {
+      console.warn(`Daily briefing: figure persisted after retry ("${invented}"); stripping those sentences.`);
+      result = { ...result, summary: stripFigureSentences(result.summary) || "See the highlights below for what came in." };
+    }
+  }
 
   // Same grounding check as classifyTicket: confirm every cited ticket id was actually in the
   // set we sent, rather than trusting the model not to invent one.
   const validTicketIds = new Set(tickets.map((t) => t.id));
-  const groundedHighlights = result.data.highlights.map((h) =>
+  const groundedHighlights = result.highlights.map((h) =>
     h.sourceTicketId && !validTicketIds.has(h.sourceTicketId)
       ? { ...h, sourceTicketId: null, confidence: Math.min(h.confidence, 0.4) }
       : h
   );
-  const grounded = { ...result.data, highlights: groundedHighlights };
+  const grounded = { ...result, highlights: groundedHighlights };
 
   await db.dailyBriefing.create({
     data: {
+      date: at,
       summary: grounded.summary,
       highlights: grounded.highlights,
       organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)

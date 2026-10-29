@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -11,40 +12,24 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import { getScopedDb } from "@/lib/db";
+import { getScopedDb, type ScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { can } from "@/lib/authz";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime, formatShortDate, plural } from "@/lib/utils";
 import { SCENARIO } from "@/lib/scenario";
 import { JobsByStatusChart } from "@/components/jobs-by-status-chart";
 import { AutomationOutcomesChart } from "@/components/automation-outcomes-chart";
 import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 
-const JOB_STATUS_ORDER = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
-const RUN_OUTCOME_ORDER = ["SUCCESS", "SKIPPED", "FAILED"];
+const JOB_STATUS_ORDER = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const;
+const RUN_OUTCOME_ORDER = ["SUCCESS", "SKIPPED", "FAILED"] as const;
+const RUN_OUTCOME_LABEL = { SUCCESS: "Success", SKIPPED: "Skipped", FAILED: "Failed" } as const;
 const NOTIFY_RULE_NAME = "Notify on job completion over $500";
+const TREND_WINDOW_DAYS = 30;
+const LOW_CONFIDENCE_THRESHOLD = 0.5;
 
-function startHere(hasNeedsReview: boolean) {
-  return [
-    {
-      href: "/tickets",
-      title: "Tickets",
-      detail: hasNeedsReview
-        ? "One ticket is marked “needs review” right now — that's the grounding safeguard catching a real mismatch between the model's claimed quote and the source text, not a staged example."
-        : "Classified by Gemini with a source-grounded quote and confidence score on every ticket. Classification is a real, non-deterministic call each time — when the model's claimed quote doesn't actually match the source, confidence is auto-capped and the ticket flagged, so that badge won't always be present, but the safeguard runs on every single ticket.",
-    },
-    {
-      href: "/automations",
-      title: "Automations",
-      detail: "A real run history: matched, skipped by filter, and the webhook it triggered.",
-    },
-    {
-      href: "/briefings",
-      title: "Briefings",
-      detail: "An AI-written summary of the day's activity, regenerated daily by a cron job, not hand-written.",
-    },
-  ];
-}
+type JobScope = { assignedToId?: string };
 
 type ActivityItem = {
   id: string;
@@ -55,86 +40,59 @@ type ActivityItem = {
   createdAt: Date;
 };
 
-export default async function DashboardPage() {
-  const session = await getSession();
-  if (!session) return null;
-  const db = await getScopedDb();
-
-  // Owners/dispatchers see org-wide job numbers; a technician's hero metric and charts reflect
-  // only their own assigned jobs — same row-level rule the Jobs page itself enforces.
-  const technicianScope = session.role === "TECHNICIAN" ? { assignedToId: session.userId } : {};
-
-  const [
-    jobCount,
-    openJobs,
-    ticketCount,
-    ruleCount,
-    recentRuns,
-    recentDeliveries,
-    jobsByStatus,
-    runsByOutcome,
-    needsReviewCount,
-    completedAgg,
-    notifyRule,
-    completedJobs,
-  ] = await Promise.all([
-    db.job.count({ where: technicianScope }),
-    db.job.count({ where: { ...technicianScope, status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
-    db.ticket.count(),
-    db.automationRule.count({ where: { isActive: true } }),
-    db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
-    db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
-    db.job.groupBy({ by: ["status"], where: technicianScope, _count: { _all: true } }),
-    db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
-    db.ticket.count({ where: { confidence: { lt: 0.5 } } }),
-    db.job.aggregate({ where: { ...technicianScope, status: "COMPLETED" }, _sum: { revenue: true }, _count: true }),
-    db.automationRule.findFirst({ where: { name: NOTIFY_RULE_NAME } }),
+async function loadJobStats(db: ScopedDb, scope: JobScope) {
+  const since = new Date(Date.now() - TREND_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [jobsByStatus, completedAgg, recentCompleted, ticketCount, needsReviewCount] = await Promise.all([
+    db.job.groupBy({ by: ["status"], where: scope, _count: { _all: true } }),
+    db.job.aggregate({ where: { ...scope, status: "COMPLETED" }, _sum: { revenue: true }, _count: true }),
     db.job.findMany({
-      where: { ...technicianScope, status: "COMPLETED", completedAt: { not: null } },
+      where: { ...scope, status: "COMPLETED", completedAt: { gte: since } },
       select: { completedAt: true, revenue: true },
     }),
+    db.ticket.count(),
+    db.ticket.count({ where: { confidence: { lt: LOW_CONFIDENCE_THRESHOLD } } }),
   ]);
 
-  const notifiedCount = notifyRule
-    ? await db.automationRun.count({ where: { ruleId: notifyRule.id, status: "SUCCESS" } })
-    : 0;
-
-  // generateDailyBriefing() is only ever called by prisma/seed.ts (once) or the daily
-  // simulate-day cron, never by an ad-hoc user action elsewhere in the app, so its most recent
-  // createdAt is a clean, honest proxy for "when did the automated refresh last actually run."
-  const lastBriefing = await db.dailyBriefing.findFirst({ orderBy: { createdAt: "desc" } });
-  const lastRunAt = lastBriefing?.createdAt ?? null;
-
-  const jobStatusData = JOB_STATUS_ORDER.map((status) => ({
-    status,
-    count: jobsByStatus.find((g) => g.status === status)?._count._all ?? 0,
-  })).filter((d) => d.count > 0);
-
-  const runOutcomeData = RUN_OUTCOME_ORDER.map((outcome) => ({
-    outcome,
-    count: runsByOutcome.find((g) => g.status === outcome)?._count._all ?? 0,
-  })).filter((d) => d.count > 0);
+  const countFor = (status: string) => jobsByStatus.find((g) => g.status === status)?._count._all ?? 0;
 
   const revenueByDay = new Map<string, number>();
-  for (const job of completedJobs) {
+  for (const job of recentCompleted) {
     if (!job.completedAt) continue;
     const key = job.completedAt.toISOString().slice(0, 10);
     revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + Number(job.revenue ?? 0));
   }
-  const revenueTrendData = Array.from(revenueByDay.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-7)
-    .map(([date, revenue]) => ({
-      label: new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      revenue: Math.round(revenue * 100) / 100,
-    }));
 
-  const stats = [
-    { label: "Total jobs", value: jobCount, icon: Briefcase },
-    { label: "Open jobs", value: openJobs, icon: FolderClock },
-    { label: "Tickets", value: ticketCount, icon: Ticket },
-    { label: "Active automation rules", value: ruleCount, icon: Zap },
-  ];
+  return {
+    jobCount: jobsByStatus.reduce((sum, g) => sum + g._count._all, 0),
+    openJobs: countFor("SCHEDULED") + countFor("IN_PROGRESS"),
+    jobStatusData: JOB_STATUS_ORDER.map((status) => ({ status, count: countFor(status) })).filter((d) => d.count > 0),
+    completedCount: completedAgg._count,
+    completedRevenue: Number(completedAgg._sum.revenue ?? 0),
+    revenueTrendData: Array.from(revenueByDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-7)
+      .map(([date, revenue]) => ({ label: formatShortDate(date), revenue: Math.round(revenue * 100) / 100 })),
+    ticketCount,
+    needsReviewCount,
+  };
+}
+
+async function loadAutomationStats(db: ScopedDb) {
+  const [ruleCount, runsByOutcome, recentRuns, recentDeliveries, notifiedCount] = await Promise.all([
+    db.automationRule.count({ where: { isActive: true } }),
+    db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.automationRun.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      include: { rule: { select: { name: true } } },
+    }),
+    db.webhookDelivery.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      include: { webhookConfig: { select: { targetUrl: true } } },
+    }),
+    db.automationRun.count({ where: { status: "SUCCESS", rule: { name: NOTIFY_RULE_NAME } } }),
+  ]);
 
   const activity: ActivityItem[] = [
     ...recentRuns.map((run) => ({
@@ -150,7 +108,7 @@ export default async function DashboardPage() {
       kind: "webhook" as const,
       label: delivery.webhookConfig.targetUrl,
       detail: delivery.success
-        ? `${delivery.statusCode} · ${delivery.durationMs}ms`
+        ? [delivery.statusCode, delivery.durationMs !== null ? `${delivery.durationMs}ms` : null].filter(Boolean).join(" · ")
         : (delivery.errorMessage ?? "Failed"),
       success: delivery.success,
       createdAt: delivery.createdAt,
@@ -159,7 +117,77 @@ export default async function DashboardPage() {
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .slice(0, 10);
 
-  const completedRevenue = Number(completedAgg._sum.revenue ?? 0);
+  return {
+    ruleCount,
+    notifiedCount,
+    activity,
+    runOutcomeData: RUN_OUTCOME_ORDER.map((outcome) => ({
+      outcome,
+      label: RUN_OUTCOME_LABEL[outcome],
+      count: runsByOutcome.find((g) => g.status === outcome)?._count._all ?? 0,
+    })).filter((d) => d.count > 0),
+  };
+}
+
+const GRID_COLS: Record<number, string> = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4" };
+
+export const metadata: Metadata = { title: "Dashboard" };
+
+export default async function DashboardPage() {
+  const session = await getSession();
+  if (!session) return null;
+  const db = await getScopedDb();
+
+  const isTechnician = session.role === "TECHNICIAN";
+  const showAutomation = can(session.role, "view:automations");
+  const showBriefings = can(session.role, "view:briefings");
+
+  // A technician's numbers and charts reflect only their own assigned jobs — the same row-level
+  // rule the Jobs page itself enforces. Automation history and briefings are org-wide management
+  // views, so each is loaded only for roles the matrix (lib/authz.ts) grants it to.
+  const scope: JobScope = isTechnician ? { assignedToId: session.userId } : {};
+
+  const [jobs, automation, lastBriefing] = await Promise.all([
+    loadJobStats(db, scope),
+    showAutomation ? loadAutomationStats(db) : null,
+    showBriefings ? db.dailyBriefing.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } }) : null,
+  ]);
+
+  const stats = [
+    { label: isTechnician ? "Your jobs" : "Total jobs", value: jobs.jobCount, icon: Briefcase },
+    { label: "Open jobs", value: jobs.openJobs, icon: FolderClock },
+    { label: "Tickets", value: jobs.ticketCount, icon: Ticket },
+    ...(automation ? [{ label: "Active automation rules", value: automation.ruleCount, icon: Zap }] : []),
+  ];
+
+  const startItems = [
+    {
+      href: "/tickets",
+      title: "Tickets",
+      detail:
+        jobs.needsReviewCount > 0
+          ? `${plural(jobs.needsReviewCount, "ticket")} ${jobs.needsReviewCount === 1 ? "is" : "are"} marked “needs review” right now — the grounding safeguard catching a mismatch between the model's quoted evidence and the source text.`
+          : "Classified with a source-grounded quote and a confidence score. Low-confidence or mis-grounded results are flagged for a human to check.",
+    },
+    {
+      href: "/automations",
+      title: "Automations",
+      detail: "A real run history: matched, skipped by a filter, and the webhook it triggered.",
+      show: showAutomation,
+    },
+    {
+      href: "/briefings",
+      title: "Briefings",
+      detail: "An AI-written summary of the day's activity, checked so it can't quote figures that aren't in the data.",
+      show: showBriefings,
+    },
+    {
+      href: "/jobs",
+      title: "Jobs",
+      detail: "Change a job's status. Completing one records the invoice total, which is what revenue-based rules evaluate.",
+      show: !showAutomation,
+    },
+  ].filter((item) => item.show !== false);
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -174,24 +202,28 @@ export default async function DashboardPage() {
       <Card className="border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent">
         <CardContent className="py-6">
           <p className="font-display text-4xl font-medium tracking-tight text-foreground sm:text-5xl">
-            {completedAgg._count} jobs completed
-            <span className="text-primary"> · ${completedRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            {plural(jobs.completedCount, "job")} completed
+            <span className="text-primary"> · {formatCurrency(jobs.completedRevenue)}</span>
           </p>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Owner notified automatically on {notifiedCount} job{notifiedCount === 1 ? "" : "s"} that
-            cleared $500 — nobody had to remember to check.
-          </p>
-          {lastRunAt ? (
-            <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="relative flex size-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
-                <span className="relative inline-flex size-2 rounded-full bg-primary" />
+          {automation && automation.notifiedCount > 0 ? (
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              The owner was notified automatically on {plural(automation.notifiedCount, "job")} that cleared $500 —
+              nobody had to remember to check.
+            </p>
+          ) : isTechnician ? (
+            <p className="mt-1.5 text-sm text-muted-foreground">Across the jobs assigned to you.</p>
+          ) : null}
+          {lastBriefing ? (
+            <p className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
+              <span className="mt-1 inline-flex size-2 shrink-0 rounded-full bg-primary" aria-hidden />
+              <span>
+                Latest briefing: {formatDateTime(lastBriefing.createdAt)}. A scheduled job generates new activity and
+                a fresh briefing daily — see{" "}
+                <Link href="/about" className="underline underline-offset-2 hover:text-foreground">
+                  About
+                </Link>
+                .
               </span>
-              Last automated run: {formatDateTime(lastRunAt)} — a cron job runs this daily; see{" "}
-              <a href="/about" className="underline underline-offset-2 hover:text-foreground">
-                /about
-              </a>
-              .
             </p>
           ) : null}
         </CardContent>
@@ -203,14 +235,13 @@ export default async function DashboardPage() {
             <span className="font-medium">{SCENARIO.company}</span> — {SCENARIO.description}
           </p>
           <p className="mt-2 text-sm text-foreground">
-            Built to replace the two things that eat a small shop&apos;s time most: manually
-            reading and sorting every incoming phone/chat/email message, and remembering to
-            chase the jobs actually worth following up on.
+            Built to replace the two things that eat a small shop&apos;s time most: manually reading and sorting
+            every incoming phone/chat/email message, and remembering to chase the jobs actually worth following up
+            on.
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
-            This isn&apos;t a mockup — the dates span a simulated month of business, but every
-            classification, automation run, and briefing on it was produced by the app&apos;s real
-            code, not written in by hand.
+            This isn&apos;t a mockup — the dates span a simulated month of business, but every classification,
+            automation run, and briefing on it was produced by the app&apos;s real code, not written in by hand.
           </p>
         </CardContent>
       </Card>
@@ -219,11 +250,11 @@ export default async function DashboardPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5 text-base">
             <Search className="size-4 text-primary" aria-hidden />
-            New here? Start with these three
+            Where to start
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-3">
-          {startHere(needsReviewCount > 0).map((item, i) => (
+        <CardContent className={`grid gap-3 ${GRID_COLS[startItems.length] ?? "sm:grid-cols-3"}`}>
+          {startItems.map((item, i) => (
             <Link
               key={item.href}
               href={item.href}
@@ -234,7 +265,10 @@ export default async function DashboardPage() {
                   {i + 1}
                 </span>
                 {item.title}
-                <ArrowRight className="size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                <ArrowRight
+                  className="size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                  aria-hidden
+                />
               </span>
               <span className="text-xs text-muted-foreground">{item.detail}</span>
             </Link>
@@ -242,13 +276,11 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-4 ${GRID_COLS[stats.length] ?? "sm:grid-cols-4"}`}>
         {stats.map((stat) => (
           <Card key={stat.label} className="transition-shadow hover:shadow-md">
-            <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.label}
-              </CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between gap-3 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">{stat.label}</CardTitle>
               <stat.icon className="size-4 text-primary" aria-hidden />
             </CardHeader>
             <CardContent>
@@ -258,92 +290,93 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={`grid gap-4 ${automation ? "sm:grid-cols-2" : ""}`}>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Jobs by status</CardTitle>
+            <CardTitle className="text-base">{isTechnician ? "Your jobs by status" : "Jobs by status"}</CardTitle>
           </CardHeader>
           <CardContent>
-            {jobStatusData.length > 0 ? (
-              <JobsByStatusChart data={jobStatusData} />
+            {jobs.jobStatusData.length > 0 ? (
+              <JobsByStatusChart data={jobs.jobStatusData} />
             ) : (
               <p className="text-sm text-muted-foreground">No jobs yet.</p>
             )}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Automation run outcomes</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Every evaluation gets logged, matched or not.
-            </p>
-          </CardHeader>
-          <CardContent>
-            {runOutcomeData.length > 0 ? (
-              <AutomationOutcomesChart data={runOutcomeData} />
-            ) : (
-              <p className="text-sm text-muted-foreground">No automation runs yet.</p>
-            )}
-          </CardContent>
-        </Card>
+        {automation ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Automation run outcomes</CardTitle>
+              <p className="text-xs text-muted-foreground">Every evaluation gets logged, matched or not.</p>
+            </CardHeader>
+            <CardContent>
+              {automation.runOutcomeData.length > 0 ? (
+                <AutomationOutcomesChart data={automation.runOutcomeData} />
+              ) : (
+                <p className="text-sm text-muted-foreground">No automation runs yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
-      {revenueTrendData.length > 1 ? (
+      {jobs.revenueTrendData.length > 1 ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Revenue by day</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Completed-job revenue, most recent days with activity.
-            </p>
+            <p className="text-xs text-muted-foreground">Completed-job revenue, most recent days with activity.</p>
           </CardHeader>
           <CardContent>
-            <RevenueTrendChart data={revenueTrendData} />
+            <RevenueTrendChart data={jobs.revenueTrendData} />
           </CardContent>
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent activity</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Automation runs and webhook deliveries, proof the engine actually ran, not just stat
-            cards.
-          </p>
-        </CardHeader>
-        <CardContent>
-          {activity.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No activity yet.</p>
-          ) : (
-            <div className="space-y-1">
-              {activity.map((item) => {
-                const StatusIcon =
-                  item.success === true ? CheckCircle2 : item.success === "skipped" ? CircleDashed : XCircle;
-                const statusColor =
-                  item.success === true
-                    ? "text-[var(--chart-2)]"
-                    : item.success === "skipped"
-                      ? "text-muted-foreground"
-                      : "text-destructive";
-                return (
-                  <div key={item.id} className="flex items-center gap-2.5 rounded-md px-1 py-1.5 text-xs hover:bg-muted/40">
-                    <StatusIcon className={`size-4 shrink-0 ${statusColor}`} aria-hidden />
-                    {item.kind === "webhook" ? (
-                      <WebhookIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                    ) : (
-                      <Zap className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-foreground">{item.label}</p>
-                      <p className="truncate text-muted-foreground">{item.detail}</p>
-                    </div>
-                    <span className="shrink-0 text-muted-foreground">{formatDateTime(item.createdAt)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {automation ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Recent activity</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Automation runs and webhook deliveries — proof the engine actually ran, not just stat cards.
+            </p>
+          </CardHeader>
+          <CardContent>
+            {automation.activity.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No activity yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {automation.activity.map((item) => {
+                  const StatusIcon =
+                    item.success === true ? CheckCircle2 : item.success === "skipped" ? CircleDashed : XCircle;
+                  const statusColor =
+                    item.success === true
+                      ? "text-[var(--chart-2)]"
+                      : item.success === "skipped"
+                        ? "text-muted-foreground"
+                        : "text-destructive";
+                  const statusText = item.success === true ? "Succeeded" : item.success === "skipped" ? "Skipped" : "Failed";
+                  return (
+                    <li key={item.id} className="flex items-center gap-2.5 rounded-md px-1 py-1.5 text-xs hover:bg-muted/40">
+                      <StatusIcon className={`size-4 shrink-0 ${statusColor}`} aria-hidden />
+                      <span className="sr-only">{statusText}:</span>
+                      {item.kind === "webhook" ? (
+                        <WebhookIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      ) : (
+                        <Zap className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-foreground">{item.label}</p>
+                        <p className="truncate text-muted-foreground">{item.detail}</p>
+                      </div>
+                      <span className="shrink-0 text-muted-foreground">{formatDateTime(item.createdAt)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

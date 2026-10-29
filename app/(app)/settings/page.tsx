@@ -1,7 +1,8 @@
+import type { Metadata } from "next";
 import { CheckCircle2, Info, Plus, Settings as SettingsIcon, ShieldAlert, XCircle } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/copy-button";
@@ -9,6 +10,8 @@ import { EmptyState } from "@/components/empty-state";
 import { formatDateTime, JOB_STATUS_LABEL } from "@/lib/utils";
 import { WebhookFormDialog } from "@/components/webhook-form-dialog";
 import { WebhookRowActions } from "@/components/webhook-row-actions";
+
+export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const session = await getSession();
@@ -23,6 +26,8 @@ export default async function SettingsPage() {
   }
   const db = await getScopedDb();
   const webhooks = await db.webhookConfig.findMany({
+    // The signing secret is write-only: not even loaded here, so it can't end up in the page payload.
+    omit: { secret: true },
     orderBy: { createdAt: "desc" },
     include: { deliveries: { orderBy: { createdAt: "desc" }, take: 5 } },
   });
@@ -58,7 +63,7 @@ export default async function SettingsPage() {
         <div className="space-y-3">
           {webhooks.map((hook) => (
             <Card key={hook.id}>
-              <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center justify-between gap-3 pb-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1">
                     <code className="truncate rounded-md bg-muted px-2 py-1 font-mono text-xs text-foreground">
@@ -85,7 +90,9 @@ export default async function SettingsPage() {
                   <Badge variant={hook.isActive ? "default" : "outline"}>
                     {hook.isActive ? "Active" : "Paused"}
                   </Badge>
-                  <WebhookRowActions config={hook} />
+                  <WebhookRowActions
+                    config={{ id: hook.id, targetUrl: hook.targetUrl, isActive: hook.isActive, triggerOn: hook.triggerOn }}
+                  />
                 </div>
               </CardHeader>
               <CardContent>
@@ -117,7 +124,7 @@ export default async function SettingsPage() {
                               {d.durationMs !== null ? ` · ${d.durationMs}ms` : ""}
                             </span>
                             {d.errorMessage ? (
-                              <span className="text-destructive">{d.errorMessage}</span>
+                              <span className="text-destructive-text">{d.errorMessage}</span>
                             ) : null}
                             <span className="ml-auto text-muted-foreground">{formatDateTime(d.createdAt)}</span>
                           </div>

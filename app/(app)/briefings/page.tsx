@@ -1,9 +1,13 @@
-import { Briefcase, DollarSign, Sparkles, TrendingUp, AlertTriangle, Clock, ThumbsUp } from "lucide-react";
+import type { Metadata } from "next";
+import { Briefcase, DollarSign, Sparkles, TrendingUp, AlertTriangle, Clock, ThumbsUp, ShieldAlert } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { can } from "@/lib/authz";
+import { getBriefingStats } from "@/lib/briefing-stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GenerateBriefingButton } from "@/components/generate-briefing-button";
 import { EmptyState } from "@/components/empty-state";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, plural } from "@/lib/utils";
 
 type Highlight = {
   type: "opportunity" | "risk" | "follow_up" | "praise";
@@ -19,25 +23,33 @@ const HIGHLIGHT_STYLE: Record<Highlight["type"], { icon: typeof TrendingUp; bord
   praise: { icon: ThumbsUp, border: "border-l-[var(--chart-1)]", label: "praise" },
 };
 
-export default async function BriefingsPage() {
-  const db = await getScopedDb();
-  const briefings = await db.dailyBriefing.findMany({ orderBy: { date: "desc" } });
+// Server Actions used on this page (OCR, AI calls) inherit this ceiling instead of the platform default.
+export const maxDuration = 60;
 
+export const metadata: Metadata = { title: "Briefings" };
+
+export default async function BriefingsPage() {
+  const session = await getSession();
+  if (!session) return null;
+  // A briefing summarizes the whole organization's activity and revenue — a management view.
+  if (!can(session.role, "view:briefings")) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-16 text-center">
+        <ShieldAlert className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-muted-foreground">Briefings are visible to owners and dispatchers only.</p>
+      </div>
+    );
+  }
+  const db = await getScopedDb();
+  const briefings = await db.dailyBriefing.findMany({ orderBy: { date: "desc" }, take: 30 });
+
+  // The figures above each narrative come from the same function, over the same 24-hour window,
+  // that the generator used when it wrote the narrative — so the two can't disagree.
   const dayStats = await Promise.all(
-    briefings.map(async (b) => {
-      const start = new Date(b.date);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 1);
-      const agg = await db.job.aggregate({
-        where: { completedAt: { gte: start, lt: end } },
-        _sum: { revenue: true },
-        _count: true,
-      });
-      return { id: b.id, jobsCompleted: agg._count, revenue: Number(agg._sum.revenue ?? 0) };
-    })
+    briefings.map(async (b) => ({ id: b.id, ...(await getBriefingStats(db, b.date)) }))
   );
   const statsById = new Map(dayStats.map((s) => [s.id, s]));
+  const canGenerate = can(session.role, "generate:briefing");
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -51,12 +63,12 @@ export default async function BriefingsPage() {
             AI-generated summaries of ticket activity, with source citations and confidence scores.
           </p>
         </div>
-        <GenerateBriefingButton />
+        {canGenerate ? <GenerateBriefingButton /> : null}
       </div>
       {briefings.length === 0 ? (
         <Card>
           <CardContent>
-            <EmptyState message='No briefings generated yet. Click "Generate briefing" to summarize today&apos;s tickets.' />
+            <EmptyState message="No briefings yet. Generate one to summarize the last 24 hours of tickets and jobs." />
           </CardContent>
         </Card>
       ) : (
@@ -68,16 +80,18 @@ export default async function BriefingsPage() {
               <Card key={briefing.id} className="overflow-hidden">
                 <CardHeader className="border-b bg-muted/30 pb-3">
                   <CardTitle className="text-base">{formatDate(briefing.date)}</CardTitle>
-                  <p className="text-xs text-muted-foreground">{formatDateTime(briefing.date)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Covers the 24 hours up to {formatDateTime(briefing.date)}
+                  </p>
                   {stats ? (
                     <div className="mt-1 flex flex-wrap items-center gap-4 text-xs text-foreground">
                       <span className="flex items-center gap-1.5">
                         <Briefcase className="size-3.5 text-primary" aria-hidden />
-                        {stats.jobsCompleted} job{stats.jobsCompleted === 1 ? "" : "s"} completed
+                        {plural(stats.jobsCompleted, "job")} completed
                       </span>
                       <span className="flex items-center gap-1.5">
                         <DollarSign className="size-3.5 text-primary" aria-hidden />
-                        ${stats.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} revenue
+                        {formatCurrency(stats.revenue)} revenue
                       </span>
                     </div>
                   ) : null}

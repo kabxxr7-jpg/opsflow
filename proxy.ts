@@ -9,8 +9,20 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 // whether this is relevant to them before bothering to log in at all.
 const PUBLIC_PATHS = ["/login", "/about", "/api/integrations", "/api/cron"];
 
+// Generated metadata assets (favicon, social card, ...). Browsers and link-preview crawlers
+// request these with no cookie; redirecting them to /login would hand back HTML as an "image".
+const PUBLIC_FILES = new Set([
+  "/icon",
+  "/apple-icon",
+  "/opengraph-image",
+  "/twitter-image",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/manifest.webmanifest",
+]);
+
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  return PUBLIC_FILES.has(pathname) || PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 export async function proxy(request: NextRequest) {

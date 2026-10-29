@@ -105,37 +105,63 @@ allowed to view/update it, separate from `Job.technicianId` (the simulated field
 in the UI) on purpose — the demo's technician roster doesn't have to line up 1:1 with real login
 accounts.
 
-**Query isolation, automatic not opt-in.** `lib/db.ts` exports `getScopedDb()` (reads the current
-session) and `getOrgDb(organizationId)` (for cron, which has no session and must iterate every
-org). Both return a Prisma Client Extension that injects `organizationId` into every
-`find`/`create`/`update`/`delete` call before it reaches Postgres — application code calls
-`db.job.findMany()` same as always, it just can't see another tenant's rows, there's no separate
-"scoped" query syntax to remember or forget. `findUnique`/`update`/`delete` take an id-shaped
-`where` that can't have `organizationId` merged into it, so those get a post-fetch/pre-mutation
-ownership check instead (verify the row belongs to this org, throw a generic not-found otherwise,
-not a 403 that would confirm the row exists in someone else's org). The raw, unscoped Prisma
-client (`rawDb`) exists only for cron's per-org iteration and auth's own user lookup (which
-happens *before* there's a session to scope by) — regular app code never imports it directly.
+**Query isolation, automatic not opt-in.** `lib/db.ts` exports `getScopedDb()` (reads the session)
+and `getOrgDb(organizationId)` (for cron, which has no session). Both return a Prisma Client
+Extension that intercepts every operation. The rules are derived from the Prisma schema at runtime
+(`Prisma.dmmf`), not from hand-maintained lists: any model with an `organizationId` is a tenant
+model, and any scalar backing a relation is a foreign key. Adding a tenant table scopes it
+automatically — and adding a table *without* an `organizationId` makes the scoped client refuse it
+until someone decides what it means (it fails closed). Application code calls `db.job.findMany()`
+exactly as it always would; there's no separate "scoped" syntax to remember or forget.
 
-**Authorization, separate from scoping.** Row-level org isolation answers "can this org see this
-row at all"; `lib/authz.ts`'s `assertCan()` and `assertCanUpdateJob()` answer "can *this user*, in
-*this role*, do *this specific thing*" within their own org. Automations and Settings are
-owner-only (`assertCan(session, "manage:automations" | "manage:webhooks")`, enforced both as a
-page-level gate and inside every Server Action, not just hidden nav links). A technician can
-update the status of a job assigned to them (`assertCanUpdateJob`) but not someone else's job, and
-their dashboard/jobs-list queries are filtered to `assignedToId: session.userId` so they
-structurally can't see a coworker's jobs, not just UI-filtered after the fact.
+- Reads, updates and deletes get the tenant filter AND-ed onto the caller's `where` — it
+  intersects with what the caller asked for, never replaces it. That includes `findUnique`,
+  `update` and `delete`, because Prisma's unique-where accepts extra non-unique conditions.
+- Creates always stamp the caller's `organizationId` (whatever was passed is discarded), and
+  updates can't change it.
+- Every foreign key written (a job's customer, a ticket's job, a job's assignee) is checked to
+  point at a row in the *same* organization, so a row can't be attached to someone else's.
+- Nested relation writes (`connect`/`create` through a relation field) are rejected, since they
+  would be a way around those checks. Raw SQL (`$queryRaw` and friends) is not offered on the
+  scoped client, and neither are the `User` and `Organization` models.
+- ESLint (`eslint.config.mjs`) bans importing the raw client anywhere except the few files that
+  legitimately have no tenant to scope by (login, cron, the signed integration endpoints, seed,
+  tests), so the guarantee can't erode by accident.
+
+`tests/isolation.test.ts` is the proof rather than the claim: a client scoped to organization A
+tries to read, update, delete, create into, link to and move rows belonging to organization B, and
+each attempt is checked through the raw client to confirm B's data is untouched.
+
+**Authorization, separate from scoping.** Org isolation answers "can this organization see this
+row at all"; `lib/authz.ts` answers "can *this role* do *this thing*". The whole role matrix is one
+table (`GRANTS`) that both the UI (which nav links appear, which dashboard widgets render) and the
+Server Actions read, so the two can't drift apart:
+
+| | Owner | Dispatcher | Technician |
+|---|---|---|---|
+| Jobs: view, change status | all jobs | all jobs | only jobs assigned to them |
+| Briefings: view, generate | yes | yes | no |
+| Automations and Settings (webhooks) | yes | no | no |
+
+Anything not granted is denied, and every Server Action calls `assertCan()` itself — not just the
+page — so a hidden link is never the only protection. The technician rule is row-level, so it
+lives next to the query: job lists are filtered to `assignedToId` in the query itself, and
+`assertCanUpdateJob()` checks the specific row. `tests/authz.test.ts` pins the full matrix.
 
 **Passwords and sessions.** `lib/password.ts` hashes with Node's built-in `scrypt` (no extra
-dependency) and verifies with `timingSafeEqual`. The session is a signed JWT cookie (`jose`,
-`lib/auth.ts`) carrying `{userId, organizationId, role}` — every authorization decision reads from
-that, nothing is re-derived from a client-supplied value. The login page's demo-account buttons
-fill the email/password fields, they don't bypass the form; clicking one still goes through the
-real `verifyPassword` → session-creation path.
+dependency) and verifies with `timingSafeEqual`. Login does a full scrypt even for an email with no
+account, so response time doesn't reveal which emails exist, and the post-login redirect only
+honours same-site paths. The session is a signed JWT cookie (`jose`, `lib/auth.ts`) carrying
+`{userId, organizationId, role}` — every authorization decision reads from that, nothing is
+re-derived from a client-supplied value. The login page's demo-account buttons fill the
+email/password fields, they don't bypass the form; clicking one still goes through the real
+`verifyPassword` → session-creation path.
 
 **Cron, scoped per-organization.** Both Vercel Cron routes (`/api/cron/retry-webhooks`,
 `/api/cron/simulate-day`) have no user session to scope by, so they fetch every `Organization` and
-run their logic once per org via `getOrgDb(org.id)`, never a single global sweep across tenants.
+run their logic once per org via `getOrgDb(org.id)`, never a single global sweep across tenants. One
+organization failing doesn't abort the others, and in production a missing `CRON_SECRET` locks the
+endpoints rather than opening them.
 
 ## The automation engine: trigger → filter → action
 
@@ -143,7 +169,9 @@ run their logic once per org via `getOrgDb(org.id)`, never a single global sweep
 or `ticket.created`), optional filters (field/operator/value, all must match), and one or more
 actions (`tag` or `webhook`). Every evaluation, whether it matched, was skipped by a filter, or an
 action failed, writes an `AutomationRun` row, so the run history is a true audit log, not just a
-count of successes.
+count of successes. Rule definitions are stored as JSON, so they're re-validated on every run
+rather than trusted: a malformed rule is logged as a failed run and skipped, and can't take the
+rest of the organization's automations (or the job update that triggered them) down with it.
 
 ## The AI feature: ticket classification + daily briefings
 
@@ -151,7 +179,12 @@ count of successes.
 summary, confidence score, and the exact source quote the classification is grounded on. The daily
 briefing does the same at a higher level: reads a day's tickets and job activity, returns a
 narrative summary plus cited highlights (opportunities, risks, follow-ups), each tagged to a real
-ticket id.
+ticket id. The figures shown above each briefing (jobs completed, revenue) come straight from the
+database, over the same 24-hour window the model was given — and the narrative isn't allowed to
+state numbers of its own: a check rejects a summary that does, retries once with a correction, and
+as a last resort drops the offending sentences. A model told "don't quote figures" will still
+occasionally do it, and "18 jobs completed" printed under a header saying 2 is exactly the failure
+a hallucination-safeguards project can't ship.
 
 This uses Gemini's structured-output mode, same discipline as the companion project: a Zod schema
 is the source of truth, exported to JSON Schema for the model, and the response is validated
@@ -177,13 +210,25 @@ back malformed. Two things go further than that project did:
 
 Outbound (`lib/webhooks.ts`): a job reaching a configured status fires a signed POST, HMAC-SHA256
 over `timestamp + "." + body`, logged whether it succeeds or fails, with a 30s → 5min → give-up
-retry schedule swept by `/api/cron/retry-webhooks`, decoupled from the original request.
+retry schedule swept by `/api/cron/retry-webhooks`, decoupled from the original request. A failed
+attempt is *claimed* when it's retried, so a later sweep can't re-send an event that a retry
+already delivered.
+
+Anyone who can configure an endpoint can make the server send a request, so the target is checked
+twice (`lib/safe-url.ts`): when it's saved, and again at connect time through a custom DNS
+`lookup`, so DNS rebinding can't swap in a private address afterwards. Only public https addresses
+on standard ports are accepted; loopback, private, link-local, cloud-metadata, IPv4-mapped IPv6,
+NAT64 and 6to4 ranges are refused; redirects are never followed; the response body is capped.
+Signing secrets are write-only — never rendered back to the browser after saving.
 
 Inbound (`app/api/integrations/`): `/api/integrations/classify` and `/api/integrations/n8n-callback`
 accept signed requests from external callers, verified with the same HMAC scheme in reverse
 (`verifySignature()` in `lib/webhooks.ts`, so signing and verifying share one implementation, not
-two that can drift apart), and reject anything incorrectly signed or stale. This was verified
-directly: a correctly-signed request succeeds, a forged signature gets a 401, not a silent pass.
+two that can drift apart), and reject anything incorrectly signed or stale.
+`/api/integrations/test-echo` is a real receiver for this app's own webhooks, so the whole
+sign → deliver → verify loop can be demonstrated end to end: it recomputes the HMAC, compares in
+constant time, enforces the 5-minute replay window, and answers 401 to anything that doesn't
+verify (`tests/test-echo.test.ts` covers a forged signature, a tampered body and a replay).
 
 ## The n8n workflow: a real artifact, not a simulation
 
@@ -207,7 +252,10 @@ the text server-side; that text goes straight into the same `classifyTicket()` f
 ticket uses, no separate AI path to maintain. The resulting ticket carries two confidence scores,
 not one: OCR confidence (was the text itself read correctly) and AI confidence (is the
 classification of that text correct), surfaced separately because they're different failure
-modes, a low OCR score means the extracted text may be garbled before the AI even sees it.
+modes, a low OCR score means the extracted text may be garbled before the AI even sees it. Uploads
+are identified by their leading bytes rather than the filename or declared type, and large phone
+photos are shrunk in the browser before upload, so an ordinary camera shot doesn't hit the
+request-size limit.
 
 ## Skills demonstrated, mapped to what was actually asked for
 
@@ -221,6 +269,40 @@ modes, a low OCR score means the extracted text may be garbled before the AI eve
 | HMAC-signed, retried, logged webhooks, both directions | "REST APIs," "webhooks, code steps, filters" | `lib/webhooks.ts`, `app/api/integrations/` |
 | Vendor-agnostic AI seam (`getClient()`), one line to swap providers | "Claude API" / "OpenAI" postings where the actual vendor used differs | `lib/ai.ts` |
 
+## Tests
+
+`npm test` runs 200+ tests with Node's built-in runner (`node:test` through `tsx`, no framework
+dependency). The database-backed ones run against a local Postgres only — they refuse a non-local
+`DATABASE_URL` — and create and remove throwaway organizations.
+
+| Area | What's pinned down |
+|---|---|
+| Tenant isolation (`isolation.test.ts`) | Cross-organization reads, writes, deletes, moves, foreign keys, nested writes, raw SQL |
+| Roles (`authz.test.ts`) | The full role × action matrix and the technician row-level rule |
+| SSRF guard (`safe-url.test.ts`) | Blocked and allowed address ranges, URL rules, the connect-time DNS check |
+| Webhooks (`webhooks.test.ts`, `test-echo.test.ts`) | Signing, the replay window, delivery to a real local server, retries, blocked targets, the receiver rejecting forgeries |
+| Rule engine (`automations.test.ts`) | Filter semantics; a malformed rule is logged and doesn't take the others down |
+| Validation (`validation.test.ts`) | Rule, webhook, ticket and job input schemas; post-login redirect safety |
+| Deletion (`cleanup.test.ts`) | Removing a rule or endpoint that has history; can't touch another organization's |
+| AI guardrails (`briefing.test.ts`) | The briefing narrative can't state figures; the stats window |
+
+What they don't cover: the browser UI (checked by hand, plus a contrast/accessibility sweep in
+light and dark at desktop and phone widths — not automated), and the live Gemini and Tesseract
+calls (the validation around them is tested; the calls themselves need keys and binaries).
+
+## Hardening, and what's still open
+
+Done: Server Actions validate input with Zod and return failures as values (production masks
+thrown messages); the AI and OCR actions are rate-limited per organization, because the login page
+publishes working demo credentials; responses carry `nosniff`, frame-deny, HSTS, referrer and
+permissions headers; the cron endpoints fail closed.
+
+Open, deliberately: there is **no Content-Security-Policy** (Next injects inline scripts, so a
+useful policy needs per-request nonces); throttles are per organization, not per IP, and login has
+no lockout; sessions are 30-day stateless JWTs with no server-side revocation; and the live demo
+database was migrated by applying SQL directly, so it has no `_prisma_migrations` history — baseline
+it (`prisma migrate resolve --applied …`) before ever running `migrate deploy` against it.
+
 ## Setup
 
 ```bash
@@ -230,6 +312,9 @@ npx prisma migrate dev
 npm run db:seed
 npm run dev
 ```
+
+Other scripts: `npm test` (see above — point `DATABASE_URL` at a local database first), `npm run lint`
+(includes the rule that keeps the raw Prisma client out of application code), `npm run build`.
 
 `.env.example` documents every variable and where to get it. `lib/env.ts` validates them at access
 time with a clear error, not a scattering of unchecked `process.env.X` calls.

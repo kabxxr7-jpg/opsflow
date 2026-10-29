@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
   // per-organization), which in practice means one organization. Resolved via lookup, not
   // trusted from the request body, same "never take organizationId from the client" rule the
   // scoping layer itself follows.
-  const org = await rawDb.organization.findFirst({ select: { id: true } });
+  const org = await rawDb.organization.findFirst({ select: { id: true }, orderBy: { createdAt: "asc" } });
   if (!org) {
     return NextResponse.json({ error: "No organization configured." }, { status: 500 });
   }

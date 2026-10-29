@@ -1,4 +1,6 @@
-import { Code2, Sparkles, ShieldCheck, Layers, Compass, CheckCircle2 } from "lucide-react";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Code2, Sparkles, ShieldCheck, Layers, Compass, CheckCircle2, Lock, FlaskConical } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const REPO_URL = "https://github.com/kabxxr7-jpg/opsflow";
@@ -8,6 +10,7 @@ const TLDR = [
   "Notifies you the moment a completed job is worth following up on — no one has to remember to flag it.",
   "Everything on this site is real: every classification, automation run, and briefing was produced by the actual AI and automation code, refreshed daily by a cron job — not written in to look good.",
   "Real multi-user accounts with role-based access: an Owner sees everything, Technicians only see their own assigned jobs — enforced at the database query layer, not just hidden in the UI.",
+  "Each company's data is walled off from every other's, and there's an automated test suite (200+ tests) that actively tries to break that wall — reading, changing, and reaching into another company's records.",
 ];
 
 const STACK = [
@@ -15,6 +18,8 @@ const STACK = [
   { name: "Prisma + Postgres (Supabase)", why: "Schema-first, migration-tracked, pinned to Prisma 6." },
   { name: "Gemini (gemini-flash-lite-latest)", why: "Free tier, no card required — this was a self-funded build. See \"The AI model\" below for why that doesn't mean a thin wrapper." },
   { name: "Tesseract.js", why: "OCR with zero cloud account. Proves the pipeline shape, not production-grade accuracy — a real deployment swaps in Document AI/Textract at one seam." },
+  { name: "Zod", why: "One schema per boundary: the AI's output, every Server Action's input, and the stored automation rules are all parsed rather than trusted." },
+  { name: "node:test + tsx", why: "200+ tests with Node's built-in runner and no framework dependency; the isolation and webhook tests run against a real local Postgres and a real local HTTP server." },
   { name: "shadcn/ui on Base UI + Tailwind v4", why: "Component primitives, not a page builder." },
   { name: "Vercel (hosting + cron)", why: "Two daily cron jobs: one retries failed webhook deliveries, one keeps this demo's data from going stale (see below)." },
 ];
@@ -37,6 +42,8 @@ const SCOPE_NEXT = [
     body: "The in-DB nextRetryAt + cron sweep is the right amount of infrastructure for this volume. A high-throughput deployment would move this to a proper queue (SQS, BullMQ).",
   },
 ];
+
+export const metadata: Metadata = { title: "About" };
 
 export default function AboutPage() {
   return (
@@ -73,7 +80,7 @@ export default function AboutPage() {
             ))}
           </ul>
           <p className="mt-4 text-xs text-muted-foreground">
-            Everything below this point is the technical detail behind those four lines, for
+            Everything below this point is the technical detail behind those lines, for
             anyone who wants to verify the claims rather than take them on faith.
           </p>
         </CardContent>
@@ -118,9 +125,9 @@ export default function AboutPage() {
             capped and the ticket flagged &ldquo;needs review.&rdquo; This runs on every classification,
             every time — since classification is a real, non-deterministic model call rather than
             scripted output, a flagged ticket won&apos;t always be sitting on{" "}
-            <a href="/tickets" className="text-primary underline underline-offset-2">
+            <Link href="/tickets" className="text-primary underline underline-offset-2">
               /tickets
-            </a>{" "}
+            </Link>{" "}
             when you look, but when one is, that&apos;s this safeguard working, not a sign the AI
             is unreliable.
           </p>
@@ -158,16 +165,69 @@ export default function AboutPage() {
           <p>
             Isolation is enforced where it actually matters — the query, not the page. A Prisma
             Client Extension (<code className="font-mono text-foreground">lib/db.ts</code>{"'s"}{" "}
-            <code className="font-mono text-foreground">getScopedDb()</code>) injects the
-            session&apos;s organizationId into every read, write, and delete on every tenant
-            table automatically; application code never imports the raw Prisma client. A
-            technician&apos;s job list is additionally filtered to{" "}
-            <code className="font-mono text-foreground">assignedToId</code> in the query itself, and{" "}
-            <code className="font-mono text-foreground">lib/authz.ts</code>{"'s "}
-            <code className="font-mono text-foreground">assertCan()</code> blocks
-            Automations/Settings management for anyone who isn&apos;t an Owner, both in the UI
-            and — the part that actually matters — in the Server Action itself, so the check
-            can&apos;t be bypassed by calling the action directly.
+            <code className="font-mono text-foreground">getScopedDb()</code>) adds the session&apos;s
+            organization to every read, write, and delete on every tenant table, stamps it on every
+            create, and checks that every record you link to is in the same organization. Its rules
+            are derived from the Prisma schema itself, so a new table is scoped automatically — and
+            a table it doesn&apos;t understand is refused, not waved through. Raw SQL isn&apos;t
+            available on it, and a lint rule keeps the unscoped client out of application code.
+          </p>
+          <p>
+            Roles are one table in <code className="font-mono text-foreground">lib/authz.ts</code>{" "}
+            that both the UI and the Server Actions read: Owners get everything; Dispatchers get jobs
+            and briefings; Technicians get only the jobs assigned to them (filtered in the query
+            itself, and re-checked per row on update). Every Server Action checks its own
+            permission, so the check can&apos;t be bypassed by calling the action directly.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Lock className="size-4 text-primary" aria-hidden />
+            Hardening, and what&apos;s still open
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            Outbound webhooks can only target public https addresses — checked when saved and again
+            when connecting, so a hostname can&apos;t be switched to an internal address afterwards
+            (SSRF and DNS-rebinding protection). Signing secrets are write-only: once saved they&apos;re
+            never shown again. Server Actions validate their input and return errors instead of
+            crashing. The AI and OCR actions are rate-limited per organization, because this login
+            page publishes working demo credentials. The built-in webhook receiver verifies
+            signatures, and rejects forged, tampered, and replayed requests.
+          </p>
+          <p>
+            <strong className="text-foreground">Not done, on purpose:</strong> there is no
+            Content-Security-Policy yet (Next injects inline scripts, so a useful one needs
+            per-request nonces); rate limits are per organization rather than per IP, and login has
+            no lockout; sessions are 30-day signed tokens with no server-side revocation.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FlaskConical className="size-4 text-primary" aria-hidden />
+            What&apos;s tested
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            <code className="font-mono text-foreground">npm test</code> runs 200+ tests: cross-tenant
+            attack attempts against a real database, the full role matrix, the SSRF address rules,
+            webhook delivery to a real local server (signing, retries, blocked targets), the rule
+            engine including malformed rules, input validation, and the guard that stops the AI
+            briefing from stating figures. The browser UI is checked by hand and with a
+            contrast/accessibility sweep, not automated, and the live Gemini and OCR calls aren&apos;t
+            part of the suite. Full table in the{" "}
+            <a href={`${REPO_URL}#tests`} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+              README
+            </a>
+            .
           </p>
         </CardContent>
       </Card>

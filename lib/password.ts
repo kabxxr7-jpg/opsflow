@@ -19,3 +19,17 @@ export function verifyPassword(password: string, stored: string): boolean {
   if (candidate.length !== expected.length) return false;
   return timingSafeEqual(candidate, expected);
 }
+
+let dummyHash: string | undefined;
+
+/**
+ * Like verifyPassword, but when there is no stored hash (no such account) it still does a full
+ * scrypt against a throwaway one. Without this, "unknown email" returns measurably faster than
+ * "wrong password", which lets anyone probe which emails have accounts.
+ */
+export function verifyPasswordOrDummy(password: string, stored: string | undefined): boolean {
+  if (stored) return verifyPassword(password, stored);
+  dummyHash ??= hashPassword("opsflow-timing-equaliser");
+  verifyPassword(password, dummyHash);
+  return false;
+}

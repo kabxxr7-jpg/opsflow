@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { CheckCircle2, CircleDashed, Plus, ShieldAlert, XCircle, Zap } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
@@ -6,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import { RuleFormDialog } from "@/components/rule-form-dialog";
 import { RuleRowActions } from "@/components/rule-row-actions";
 import { EmptyState } from "@/components/empty-state";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, JOB_STATUS_LABEL } from "@/lib/utils";
 
 const RUN_STATUS_ICON: Record<string, { Icon: typeof CheckCircle2; color: string }> = {
   SUCCESS: { Icon: CheckCircle2, color: "text-[var(--chart-2)]" },
   SKIPPED: { Icon: CircleDashed, color: "text-muted-foreground" },
   FAILED: { Icon: XCircle, color: "text-destructive" },
 };
+
+export const metadata: Metadata = { title: "Automations" };
 
 export default async function AutomationsPage() {
   const session = await getSession();
@@ -64,16 +67,21 @@ export default async function AutomationsPage() {
       ) : (
         <div className="space-y-3">
           {rules.map((rule) => {
-            const trigger = rule.trigger as { type: string; status?: string };
+            const trigger = rule.trigger as { type?: string; status?: string };
+            const triggerText =
+              trigger.type === "ticket.created"
+                ? "When a ticket is created"
+                : trigger.type === "job.status_changed"
+                  ? trigger.status
+                    ? `When a job becomes ${JOB_STATUS_LABEL[trigger.status as keyof typeof JOB_STATUS_LABEL]?.toLowerCase() ?? trigger.status}`
+                    : "When a job's status changes"
+                  : "Unrecognised trigger";
             return (
               <Card key={rule.id}>
-                <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                <CardHeader className="flex flex-row items-center justify-between gap-3 pb-2">
                   <div>
                     <CardTitle className="text-base">{rule.name}</CardTitle>
-                    <p className="text-xs text-muted-foreground">
-                      {trigger.type}
-                      {trigger.status ? ` → ${trigger.status}` : ""}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{triggerText}</p>
                   </div>
                   <RuleRowActions rule={rule} />
                 </CardHeader>
@@ -88,6 +96,7 @@ export default async function AutomationsPage() {
                         return (
                           <div key={run.id} className="flex items-center gap-2 text-xs">
                             <Icon className={`size-4 shrink-0 ${color}`} aria-hidden />
+                            <span className="sr-only">{run.status.toLowerCase()}:</span>
                             <span className="text-muted-foreground">{run.log}</span>
                             <span className="ml-auto shrink-0 text-muted-foreground">
                               {formatDateTime(run.createdAt)}

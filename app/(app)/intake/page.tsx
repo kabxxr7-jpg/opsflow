@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Upload } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +7,11 @@ import { ImageIntakeForm } from "@/components/image-intake-form";
 import { formatDateTime } from "@/lib/utils";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
+
+// Server Actions used on this page (OCR, AI calls) inherit this ceiling instead of the platform default.
+export const maxDuration = 60;
+
+export const metadata: Metadata = { title: "Intake" };
 
 export default async function IntakePage() {
   const db = await getScopedDb();

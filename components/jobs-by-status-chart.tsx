@@ -25,7 +25,11 @@ export function JobsByStatusChart({ data }: Props) {
 
   return (
     <div className="flex items-center gap-6">
-      <div className="relative h-[140px] w-[140px] shrink-0">
+      <div
+        className="relative h-[140px] w-[140px] shrink-0"
+        role="img"
+        aria-label={`Donut chart of ${total} jobs by status: ${data.map((d) => `${STATUS_LABEL[d.status] ?? d.status} ${d.count}`).join(", ")}.`}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie

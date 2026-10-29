@@ -9,19 +9,23 @@ const OUTCOME_COLOR: Record<string, string> = {
 };
 
 type Props = {
-  data: { outcome: string; count: number }[];
+  data: { outcome: string; label: string; count: number }[];
 };
 
 export function AutomationOutcomesChart({ data }: Props) {
   return (
-    <div className="h-[140px] w-full">
+    <div
+      className="h-[140px] w-full"
+      role="img"
+      aria-label={`Bar chart of automation run outcomes: ${data.map((d) => `${d.label} ${d.count}`).join(", ")}.`}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke="var(--border)" />
           <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
           <YAxis
             type="category"
-            dataKey="outcome"
+            dataKey="label"
             width={62}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             axisLine={false}
