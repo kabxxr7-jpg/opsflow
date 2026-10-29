@@ -11,6 +11,9 @@ const EXPECTED: Record<UserRole, Record<Action, boolean>> = {
   OWNER: {
     "view:jobs": true,
     "update:job:status": true,
+    "view:tickets": true,
+    "write:tickets": true,
+    "use:intake": true,
     "view:automations": true,
     "manage:automations": true,
     "manage:webhooks": true,
@@ -21,6 +24,9 @@ const EXPECTED: Record<UserRole, Record<Action, boolean>> = {
   DISPATCHER: {
     "view:jobs": true,
     "update:job:status": true,
+    "view:tickets": true,
+    "write:tickets": true,
+    "use:intake": true,
     "view:automations": false,
     "manage:automations": false,
     "manage:webhooks": false,
@@ -31,6 +37,9 @@ const EXPECTED: Record<UserRole, Record<Action, boolean>> = {
   TECHNICIAN: {
     "view:jobs": true,
     "update:job:status": true,
+    "view:tickets": true,
+    "write:tickets": true,
+    "use:intake": true,
     "view:automations": false,
     "manage:automations": false,
     "manage:webhooks": false,

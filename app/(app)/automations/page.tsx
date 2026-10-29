@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
-import { CheckCircle2, CircleDashed, Plus, ShieldAlert, XCircle, Zap } from "lucide-react";
+import { CheckCircle2, CircleDashed, Plus, XCircle, Zap } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { can } from "@/lib/authz";
+import { NoAccess } from "@/components/no-access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RuleFormDialog } from "@/components/rule-form-dialog";
@@ -20,16 +22,7 @@ export const metadata: Metadata = { title: "Automations" };
 export default async function AutomationsPage() {
   const session = await getSession();
   if (!session) return null;
-  if (session.role !== "OWNER") {
-    return (
-      <div className="flex flex-col items-center gap-2 py-16 text-center">
-        <ShieldAlert className="size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-muted-foreground">
-          Automations are visible to the account owner only.
-        </p>
-      </div>
-    );
-  }
+  if (!can(session.role, "view:automations")) return <NoAccess message="Automations are visible to the account owner only." />;
   const db = await getScopedDb();
   const rules = await db.automationRule.findMany({
     orderBy: { createdAt: "desc" },

@@ -193,7 +193,7 @@ function buildBriefingPrompt(
 // on screen are the ones computed from the database. This is the check behind that instruction —
 // a model told "don't state numbers" will still occasionally do it, and "18 jobs completed" next
 // to a header saying 2 is precisely the failure mode a hallucination-safeguards project can't ship.
-const FIGURE_IN_NARRATIVE = /\$\s?\d|\b\d[\d,]*(?:\.\d+)?\s+(?:total\s+|new\s+|open\s+)?(?:jobs?|work orders?)\b/i;
+const FIGURE_IN_NARRATIVE = /\$\s?\d|\b\d[\d,]*(?:\.\d+)?\s+(?:[a-z-]+\s+){0,2}(?:jobs?|work orders?)\b/i;
 
 export function findInventedFigure(summary: string): string | null {
   const m = summary.match(FIGURE_IN_NARRATIVE);
@@ -270,13 +270,20 @@ export async function generateDailyBriefing(db: ScopedDb): Promise<DailyBriefing
   let invented = findInventedFigure(result.summary);
   if (invented) {
     console.warn(`Daily briefing: narrative stated a figure ("${invented}"); retrying once with a correction.`);
-    result = await requestBriefing(
-      client,
-      buildBriefingPrompt(
-        tickets,
-        `your previous summary stated "${invented}". Rewrite it without any dollar amounts or job counts.`
-      )
-    );
+    try {
+      result = await requestBriefing(
+        client,
+        buildBriefingPrompt(
+          tickets,
+          `your previous summary stated "${invented}". Rewrite it without any dollar amounts or job counts.`
+        )
+      );
+    } catch (err) {
+      // The correction is a nicety, not a requirement. A rate limit right after the first call is
+      // likely on the free tier; falling through to stripping keeps a good briefing rather than
+      // throwing the whole thing away.
+      console.warn("Daily briefing: correction retry failed; stripping the figure sentences instead.", err instanceof Error ? err.message : err);
+    }
     invented = findInventedFigure(result.summary);
     if (invented) {
       console.warn(`Daily briefing: figure persisted after retry ("${invented}"); stripping those sentences.`);

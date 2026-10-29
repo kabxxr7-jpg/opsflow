@@ -22,11 +22,14 @@ export interface OCRResult {
  * doesn't change.
  */
 export async function extractTextFromImage(imageBuffer: Buffer): Promise<OCRResult> {
-  let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
+  // Held as a promise, not awaited into a variable: if the timeout below wins while the worker is
+  // still starting up (the exact hang this guards against), `finally` can still find it and shut
+  // it down whenever it does come up, instead of leaving a stuck thread behind.
+  const workerPromise = createWorker("eng");
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const recognise = async (): Promise<OCRResult> => {
-    worker = await createWorker("eng");
+    const worker = await workerPromise;
     const result = await worker.recognize(imageBuffer);
     const text = result.data.text.trim();
     if (!text) {
@@ -49,6 +52,6 @@ export async function extractTextFromImage(imageBuffer: Buffer): Promise<OCRResu
     return await Promise.race([recognise(), timeout]);
   } finally {
     clearTimeout(timer);
-    await worker?.terminate().catch(() => {});
+    workerPromise.then((worker) => worker.terminate()).catch(() => {});
   }
 }

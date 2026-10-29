@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Upload } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { can } from "@/lib/authz";
+import { NoAccess } from "@/components/no-access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ImageIntakeForm } from "@/components/image-intake-form";
@@ -14,6 +17,9 @@ export const maxDuration = 60;
 export const metadata: Metadata = { title: "Intake" };
 
 export default async function IntakePage() {
+  const session = await getSession();
+  if (!session) return null;
+  if (!can(session.role, "use:intake")) return <NoAccess message="Document intake isn't available to your role." />;
   const db = await getScopedDb();
   const ocrTickets = await db.ticket.findMany({
     where: { source: "ocr_upload" },

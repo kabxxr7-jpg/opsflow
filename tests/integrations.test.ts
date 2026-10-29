@@ -67,33 +67,21 @@ describe("POST /api/integrations/classify — rejection paths", () => {
 });
 
 describe("POST /api/integrations/n8n-callback", () => {
-  let throwawayOrgId: string | undefined;
+  // The route files tickets into the *oldest* organization. To make that deterministic — and to
+  // avoid writing into (or racing with) whatever other data or test files are around — this suite
+  // creates its own organization dated to the epoch, which is always the oldest.
+  let target: Awaited<ReturnType<typeof makeOrg>>;
   let targetOrgId: string;
-  let runsBefore: Set<string>;
-  const createdTickets: string[] = [];
 
   before(async () => {
     assertLocalDb();
-    // The route files tickets into the oldest organization. If this database has none (a bare
-    // checkout), make one so there is somewhere for the ticket to go.
-    let oldest = await rawDb.organization.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } });
-    if (!oldest) {
-      const made = await makeOrg("callback");
-      throwawayOrgId = made.org.id;
-      oldest = { id: made.org.id };
-    }
-    targetOrgId = oldest.id;
-    // Ticket creation runs the org's automation rules, which log runs. Remember what existed so
-    // exactly the rows this test caused can be removed afterwards.
-    runsBefore = new Set((await rawDb.automationRun.findMany({ where: { organizationId: targetOrgId }, select: { id: true } })).map((r) => r.id));
+    target = await makeOrg("callback");
+    targetOrgId = target.org.id;
+    await rawDb.organization.update({ where: { id: targetOrgId }, data: { createdAt: new Date(0) } });
   });
 
   after(async () => {
-    if (createdTickets.length) await rawDb.ticket.deleteMany({ where: { id: { in: createdTickets } } });
-    const runs = await rawDb.automationRun.findMany({ where: { organizationId: targetOrgId }, select: { id: true } });
-    const added = runs.map((r) => r.id).filter((id) => !runsBefore.has(id));
-    if (added.length) await rawDb.automationRun.deleteMany({ where: { id: { in: added } } });
-    await dropOrgs(throwawayOrgId);
+    await dropOrgs(target?.org.id); // cascades to the tickets the route created
     await rawDb.$disconnect();
   });
 
@@ -115,6 +103,10 @@ describe("POST /api/integrations/n8n-callback", () => {
     assert.equal((await callbackPOST(signedRequest(CALLBACK, body, { secret: "nope" }))).status, 401);
     const stale = new Date(Date.now() - 10 * 60_000).toISOString();
     assert.equal((await callbackPOST(signedRequest(CALLBACK, body, { timestamp: stale }))).status, 401);
+    // signed for one body, sent with another
+    const original = signedRequest(CALLBACK, body);
+    const tampered = new NextRequest(original.url, { method: "POST", body: payload({ priority: "LOW" }), headers: original.headers });
+    assert.equal((await callbackPOST(tampered)).status, 401);
   });
 
   test("rejects a signed body that isn't JSON, or doesn't match the schema, with 400", async () => {
@@ -129,7 +121,6 @@ describe("POST /api/integrations/n8n-callback", () => {
     const res = await callbackPOST(signedRequest(CALLBACK, payload()));
     assert.equal(res.status, 201);
     const { id } = (await res.json()) as { id: string };
-    createdTickets.push(id);
     const ticket = await rawDb.ticket.findUnique({ where: { id } });
     assert.ok(ticket);
     assert.equal(ticket.organizationId, targetOrgId);
@@ -144,7 +135,6 @@ describe("POST /api/integrations/n8n-callback", () => {
     const res = await callbackPOST(signedRequest(CALLBACK, payload({ sourceSnippet: "words the customer never said", confidence: 0.95 })));
     assert.equal(res.status, 201);
     const { id } = (await res.json()) as { id: string };
-    createdTickets.push(id);
     const ticket = await rawDb.ticket.findUnique({ where: { id } });
     assert.equal(ticket?.sourceSnippet, null);
     assert.ok((ticket?.confidence ?? 1) <= 0.4);
@@ -156,7 +146,6 @@ describe("POST /api/integrations/n8n-callback", () => {
       const res = await callbackPOST(signedRequest(CALLBACK, payload({ organizationId: other.org.id })));
       assert.equal(res.status, 201);
       const { id } = (await res.json()) as { id: string };
-      createdTickets.push(id);
       const ticket = await rawDb.ticket.findUnique({ where: { id } });
       assert.equal(ticket?.organizationId, targetOrgId);
       assert.notEqual(ticket?.organizationId, other.org.id);

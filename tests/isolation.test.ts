@@ -271,3 +271,37 @@ describe("two clients, two worlds", () => {
     }
   });
 });
+
+describe("nested reads can't reach the blocked models either", () => {
+  // `db.user` is refused outright, but a relation is another way to a User row — and with it a
+  // password hash. Every include/select is walked, however deep.
+  const db = () => getOrgDb(A.org.id);
+
+  test("a direct include of a user relation is refused", async () => {
+    await assert.rejects(db().job.findMany({ include: { assignedTo: true } }), /User/);
+  });
+
+  test("so is selecting through it", async () => {
+    await assert.rejects(db().job.findMany({ select: { id: true, assignedTo: { select: { passwordHash: true } } } }), /User/);
+  });
+
+  test("so is reaching the organization (and from it, its users)", async () => {
+    await assert.rejects(db().customer.findMany({ include: { organization: { include: { users: true } } } }), /Organization/);
+  });
+
+  test("and so is a deep path that only arrives there at the end", async () => {
+    await assert.rejects(db().ticket.findMany({ include: { job: { include: { assignedTo: true } } } }), /User/);
+    await assert.rejects(db().automationRun.findMany({ include: { rule: { include: { organization: true } } } }), /Organization/);
+  });
+
+  test("also on writes that return rows", async () => {
+    await assert.rejects(db().customer.create({ data: { name: "x", organizationId: "" }, include: { organization: true } }), /Organization/);
+    assert.equal(await rawDb.customer.count({ where: { organizationId: A.org.id, name: "x" } }), 0, "nothing should have been written");
+  });
+
+  test("ordinary nested includes of tenant models still work", async () => {
+    const jobs = await db().job.findMany({ include: { customer: true, technician: true, tickets: true } });
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].customer.organizationId, A.org.id);
+  });
+});

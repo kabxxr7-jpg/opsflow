@@ -30,12 +30,17 @@ const SOURCE_ITEMS = { phone: "Phone", chat: "Chat", email: "Email" };
 export function NewTicketDialog() {
   const [open, setOpen] = useState(false);
   const [source, setSource] = useState("chat");
+  // Controlled on purpose: a React form action resets uncontrolled fields as soon as it returns,
+  // which would wipe what the person typed the moment the server rejected it ("a lot of tickets
+  // were just created") — exactly when they'd want to keep it.
+  const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleOpenChange(next: boolean) {
     if (next) {
       setSource("chat");
+      setText("");
       setError(null);
     }
     setOpen(next);
@@ -89,6 +94,8 @@ export function NewTicketDialog() {
                 name="rawText"
                 rows={5}
                 required
+                value={text}
+                onChange={(e) => setText(e.target.value)}
                 maxLength={LIMITS.ticketText}
                 placeholder="What is the customer saying?"
               />

@@ -29,25 +29,27 @@ describe("ruleInputSchema", () => {
     assert.ok(ruleInputSchema.safeParse(rule({ trigger: { type: "job.status_changed" } })).success);
   });
 
-  const bad: [string, Record<string, unknown>, RegExp][] = [
+  // The message is asserted only where it's something a person will read; for malformed structure
+  // (an unknown enum value, say) the point is just that it's refused.
+  const bad: [string, Record<string, unknown>, RegExp | null][] = [
     ["an empty name", { name: "   " }, /name/i],
     ["an over-long name", { name: "x".repeat(LIMITS.ruleName + 1) }, /limited/i],
-    ["an unknown trigger", { trigger: { type: "job.deleted" } }, /./],
-    ["an unknown job status", { trigger: { type: "job.status_changed", status: "EXPLODED" } }, /./],
+    ["an unknown trigger", { trigger: { type: "job.deleted" } }, null],
+    ["an unknown job status", { trigger: { type: "job.status_changed", status: "EXPLODED" } }, null],
     ["no actions", { actions: [] }, /at least one action/i],
-    ["an unknown action type", { actions: [{ type: "format_disk" }] }, /./],
+    ["an unknown action type", { actions: [{ type: "format_disk" }] }, null],
     ["a field from the wrong record type", { filters: [{ field: "priority", op: "eq", value: "URGENT" }] }, /isn't a field on jobs/],
     ["an ordering operator on a text field", { filters: [{ field: "jobType", op: "gt", value: "HVAC" }] }, /only be matched with "="/],
     ["a non-numeric value for a number comparison", { filters: [{ field: "revenue", op: "gt", value: "lots" }] }, /isn't a number/],
     ["an empty filter value", { filters: [{ field: "revenue", op: "eq", value: "  " }] }, /Enter a value/],
     ["too many filters", { filters: Array.from({ length: LIMITS.maxFilters + 1 }, () => ({ field: "revenue", op: "gt", value: "1" })) }, /at most/],
-    ["an unknown operator", { filters: [{ field: "revenue", op: "regex", value: ".*" }] }, /./],
+    ["an unknown operator", { filters: [{ field: "revenue", op: "regex", value: ".*" }] }, null],
   ];
   for (const [label, over, message] of bad) {
     test(`rejects ${label}`, () => {
       const result = ruleInputSchema.safeParse(rule(over));
       assert.equal(result.success, false);
-      if (!result.success) assert.match(result.error.issues[0].message, message);
+      if (!result.success && message) assert.match(result.error.issues[0].message, message);
     });
   }
 

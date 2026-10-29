@@ -5,7 +5,9 @@ import { checkResolvedAddresses, isPublicIp, parseWebhookTarget, UnsafeUrlError 
 const env = process.env as Record<string, string | undefined>;
 const originalNodeEnv = env.NODE_ENV;
 afterEach(() => {
-  env.NODE_ENV = originalNodeEnv;
+  // Assigning undefined to process.env stores the *string* "undefined", so remove it instead.
+  if (originalNodeEnv === undefined) delete env.NODE_ENV;
+  else env.NODE_ENV = originalNodeEnv;
 });
 
 describe("isPublicIp", () => {
@@ -34,6 +36,9 @@ describe("isPublicIp", () => {
     "64:ff9b::7f00:1", // NAT64 -> 127.0.0.1
     "2002:7f00:1::", // 6to4 -> 127.0.0.1
     "2001:db8::1",
+    "::7f00:1", // IPv4-compatible (::127.0.0.1)
+    "::a00:1", // IPv4-compatible (::10.0.0.1)
+    "::ffff:0:7f00:1", // SIIT-translated 127.0.0.1
   ];
 
   for (const ip of publicAddresses) test(`${ip} is public`, () => assert.equal(isPublicIp(ip), true));
@@ -65,6 +70,9 @@ describe("parseWebhookTarget (production)", () => {
     ["https://[::ffff:127.0.0.1]/hook", /private or internal/],
     ["https://printer.internal/hook", /private or internal/],
     ["https://intranet/hook", /private or internal/],
+    ["https://metadata.google.internal./hook", /private or internal/], // trailing root dot
+    ["https://localhost./hook", /private or internal/],
+    ["https://[::7f00:1]/hook", /private or internal/],
     ["not a url", /full URL/],
     ["ftp://example.com/hook", /https/],
     ["javascript:alert(1)", /https|full URL/],

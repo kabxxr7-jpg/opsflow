@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { assertCan } from "@/lib/authz";
-import { fail, OK, toActionError, type ActionResult } from "@/lib/action-result";
+import { fail, OK, toActionError, UserInputError, type ActionResult } from "@/lib/action-result";
 import { parseInput, webhookInputSchema } from "@/lib/validation";
 import { assertSafeWebhookTarget } from "@/lib/safe-url";
 import { deleteWebhookWithHistory } from "@/lib/cleanup";
@@ -26,7 +26,7 @@ function revalidateSettings() {
 
 async function requireOwner() {
   const session = await getSession();
-  if (!session) throw new Error("No active session.");
+  if (!session) throw new UserInputError("Your session expired. Sign in again.");
   assertCan(session, "manage:webhooks");
   return getScopedDb();
 }

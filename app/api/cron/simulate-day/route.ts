@@ -3,6 +3,7 @@ import { generateDailyBriefing, AIError } from "@/lib/ai";
 import { createFreshTickets, createFreshJob, advanceJobs, pruneOldRecords } from "@/lib/demo-simulation";
 import { rawDb, getOrgDb } from "@/lib/db";
 import { isAuthorizedCron } from "@/lib/cron-auth";
+import { DEMO_ORG_SLUGS } from "@/lib/scenario";
 
 export const maxDuration = 60;
 
@@ -15,9 +16,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // No session (cron) — iterate every organization and run the simulation once per tenant,
-  // each through its own org-scoped client, never a single cross-tenant pass.
-  const orgs = await rawDb.organization.findMany({ select: { id: true, slug: true } });
+  // No session (cron). Only the demo organization(s): this job fabricates activity and prunes old
+  // rows, so it must never run against a real tenant. Each runs through its own org-scoped client.
+  const orgs = await rawDb.organization.findMany({
+    where: { slug: { in: [...DEMO_ORG_SLUGS] } },
+    select: { id: true, slug: true },
+  });
+  if (orgs.length === 0) {
+    console.warn(`cron/simulate-day: no organization matches DEMO_ORG_SLUGS (${DEMO_ORG_SLUGS.join(", ")}); nothing to do.`);
+  }
 
   // allSettled: one organization failing must not discard (or abort) the others' work.
   const settled = await Promise.allSettled(

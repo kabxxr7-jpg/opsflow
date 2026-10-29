@@ -4,6 +4,7 @@ import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { can } from "@/lib/authz";
 import { EmptyState } from "@/components/empty-state";
+import { NoAccess } from "@/components/no-access";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,8 +29,10 @@ export const metadata: Metadata = { title: "Tickets" };
 
 export default async function TicketsPage() {
   const session = await getSession();
+  if (!session) return null;
+  if (!can(session.role, "view:tickets")) return <NoAccess message="Tickets aren't available to your role." />;
   const db = await getScopedDb();
-  const showAutomationsLink = session ? can(session.role, "view:automations") : false;
+  const showAutomationsLink = can(session.role, "view:automations");
   const tickets = await db.ticket.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
 
   return (

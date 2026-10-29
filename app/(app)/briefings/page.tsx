@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { Briefcase, DollarSign, Sparkles, TrendingUp, AlertTriangle, Clock, ThumbsUp, ShieldAlert } from "lucide-react";
+import { Briefcase, DollarSign, Sparkles, TrendingUp, AlertTriangle, Clock, ThumbsUp } from "lucide-react";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { can } from "@/lib/authz";
+import { NoAccess } from "@/components/no-access";
 import { getBriefingStats } from "@/lib/briefing-stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GenerateBriefingButton } from "@/components/generate-briefing-button";
@@ -32,14 +33,7 @@ export default async function BriefingsPage() {
   const session = await getSession();
   if (!session) return null;
   // A briefing summarizes the whole organization's activity and revenue — a management view.
-  if (!can(session.role, "view:briefings")) {
-    return (
-      <div className="flex flex-col items-center gap-2 py-16 text-center">
-        <ShieldAlert className="size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-muted-foreground">Briefings are visible to owners and dispatchers only.</p>
-      </div>
-    );
-  }
+  if (!can(session.role, "view:briefings")) return <NoAccess message="Briefings are visible to owners and dispatchers only." />;
   const db = await getScopedDb();
   const briefings = await db.dailyBriefing.findMany({ orderBy: { date: "desc" }, take: 30 });
 

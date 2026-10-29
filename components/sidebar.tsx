@@ -42,8 +42,8 @@ type NavLink = { href: string; label: string; icon: LucideIcon; requires?: Actio
 const APP_LINKS: NavLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/jobs", label: "Jobs", icon: Briefcase, requires: "view:jobs" },
-  { href: "/tickets", label: "Tickets", icon: Ticket },
-  { href: "/intake", label: "Intake", icon: Upload },
+  { href: "/tickets", label: "Tickets", icon: Ticket, requires: "view:tickets" },
+  { href: "/intake", label: "Intake", icon: Upload, requires: "use:intake" },
   { href: "/automations", label: "Automations", icon: Zap, requires: "view:automations" },
   { href: "/briefings", label: "Briefings", icon: Sparkles, requires: "view:briefings" },
   { href: "/settings", label: "Settings", icon: Settings, requires: "view:settings" },

@@ -3,6 +3,8 @@ import { rawDb } from "@/lib/db";
 import { verifySignature } from "@/lib/webhooks";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_SKEW_MS = 5 * 60_000; // same replay window verifySignature() enforces
+const SIGNATURE_SHAPE = /^sha256=[0-9a-f]{64}$/;
 
 /**
  * A real receiver for this app's own outbound webhooks, so the sign → deliver → verify loop can be
@@ -31,6 +33,12 @@ export async function POST(request: NextRequest) {
 
   const unauthorized = () => NextResponse.json({ error: "Invalid or missing signature." }, { status: 401 });
   if (!timestamp || !signature) return unauthorized();
+  // Cheap checks first. This endpoint is public, so anything that can be refused without a database
+  // round-trip should be: a stale or malformed timestamp, or a header that isn't `sha256=<64 hex>`.
+  const sentAt = Date.parse(timestamp);
+  if (Number.isNaN(sentAt) || Date.now() - sentAt > MAX_SKEW_MS || !SIGNATURE_SHAPE.test(signature)) {
+    return unauthorized();
+  }
 
   const candidates = await rawDb.webhookConfig.findMany({
     where: { isActive: true, targetUrl: { endsWith: "/api/integrations/test-echo" } },

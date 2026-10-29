@@ -31,9 +31,11 @@ const META = (() => {
   const tenant = new Set<string>();
   const foreignKeys = new Map<string, { field: string; target: string }[]>();
   const relationFields = new Map<string, Set<string>>();
+  const relationTargets = new Map<string, Map<string, string>>();
   for (const model of Prisma.dmmf.datamodel.models) {
     if (model.fields.some((f) => f.name === "organizationId")) tenant.add(model.name);
     relationFields.set(model.name, new Set(model.fields.filter((f) => f.kind === "object").map((f) => f.name)));
+    relationTargets.set(model.name, new Map(model.fields.filter((f) => f.kind === "object").map((f) => [f.name, f.type])));
     const refs: { field: string; target: string }[] = [];
     for (const f of model.fields) {
       if (f.kind !== "object") continue;
@@ -43,7 +45,7 @@ const META = (() => {
     }
     foreignKeys.set(model.name, refs);
   }
-  return { tenant, foreignKeys, relationFields };
+  return { tenant, foreignKeys, relationFields, relationTargets };
 })();
 
 // Identities and the tenants themselves. Reading another tenant's users (password hashes
@@ -53,6 +55,26 @@ const META = (() => {
 const BLOCKED_MODELS = new Set(["User", "Organization"]);
 
 const toArray = <T>(v: T | T[]): T[] => (Array.isArray(v) ? v : [v]);
+
+/**
+ * Refusing `db.user` outright isn't enough on its own: `db.job.findMany({ include: { assignedTo: true } })`
+ * would hand back User rows — password hashes included — through a relation. So every `include` /
+ * `select`, however deeply nested, is walked, and a relation that lands on a blocked model is refused.
+ * (This covers what a query *returns*; it doesn't try to police `where` filters.)
+ */
+function assertNoBlockedRelations(model: string, args: unknown, refuse: (what: string) => () => never): void {
+  if (!args || typeof args !== "object") return;
+  for (const key of ["include", "select"] as const) {
+    const spec = (args as Record<string, unknown>)[key];
+    if (!spec || typeof spec !== "object") continue;
+    for (const [field, value] of Object.entries(spec as Record<string, unknown>)) {
+      const target = META.relationTargets.get(model)?.get(field);
+      if (!target || !value) continue;
+      if (BLOCKED_MODELS.has(target)) refuse(`Reading ${target} rows through ${model}.${field}`)();
+      if (typeof value === "object") assertNoBlockedRelations(target, value, refuse);
+    }
+  }
+}
 
 function withOrgScope(organizationId: string) {
   const refuse = (what: string) => () => {
@@ -122,6 +144,7 @@ function withOrgScope(organizationId: string) {
 
           const a = args as Record<string, unknown>;
           const checked = new Set<string>();
+          assertNoBlockedRelations(model, a, refuse);
 
           switch (operation) {
             case "findFirst":

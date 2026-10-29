@@ -67,36 +67,61 @@ const MAX_RESPONSE_BYTES = 4096;
  * One POST over node's http(s) rather than fetch, for two reasons that both matter for an
  * outbound request to a user-supplied address: `lookup: safeLookup` validates the resolved IPs at
  * connect time (see lib/safe-url.ts), and http(s).request never follows redirects, so a
- * "public" URL can't bounce the request somewhere internal. The response body is capped — we
- * only keep a snippet for the delivery log, and a hostile endpoint shouldn't be able to make us
- * buffer an arbitrary amount of it.
+ * "public" URL can't bounce the request somewhere internal.
+ *
+ * Two limits keep a hostile endpoint from holding the caller hostage. The whole exchange — connect,
+ * TLS, response — gets one hard deadline; `http.request`'s own `timeout` option is only an *idle*
+ * timer that any received byte resets, so an endpoint dripping a byte every few seconds would
+ * never trip it. And the response is read only up to a cap, then dropped: we keep a snippet for
+ * the delivery log, not whatever the other side feels like sending.
  */
-function postJson(target: URL, headers: Record<string, string>, body: string): Promise<{ statusCode: number; text: string }> {
+function postJson(
+  target: URL,
+  headers: Record<string, string>,
+  body: string,
+  timeoutMs: number
+): Promise<{ statusCode: number; text: string }> {
   return new Promise((resolve, reject) => {
     const transport = target.protocol === "https:" ? https : http;
+    let settled = false;
+    const timer: { id?: ReturnType<typeof setTimeout> } = {};
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer.id);
+      fn();
+    };
+
     const req = transport.request(
       target,
       {
         method: "POST",
         headers: { ...headers, "Content-Length": String(Buffer.byteLength(body)) },
         lookup: safeLookup,
-        timeout: DELIVERY_TIMEOUT_MS,
       },
       (res) => {
         const chunks: Buffer[] = [];
         let received = 0;
+        const finish = () =>
+          settle(() => resolve({ statusCode: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8").slice(0, 2000) }));
         res.on("data", (chunk: Buffer) => {
           if (received < MAX_RESPONSE_BYTES) chunks.push(chunk);
           received += chunk.length;
+          // Enough to log. Stop reading rather than draining an endless body; the status line has
+          // already told us what we need to know.
+          if (received >= MAX_RESPONSE_BYTES) {
+            finish();
+            res.destroy();
+          }
         });
-        res.on("end", () =>
-          resolve({ statusCode: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8").slice(0, 2000) })
-        );
-        res.on("error", reject);
+        res.on("end", finish);
+        res.on("close", finish);
+        res.on("error", (err) => settle(() => reject(err)));
       }
     );
-    req.on("timeout", () => req.destroy(new Error(`Timed out after ${DELIVERY_TIMEOUT_MS / 1000}s`)));
-    req.on("error", reject);
+
+    timer.id = setTimeout(() => req.destroy(new Error(`Timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+    req.on("error", (err) => settle(() => reject(err)));
     req.end(body);
   });
 }
@@ -111,7 +136,8 @@ export async function deliverWebhook(
     eventType: string;
     payload: Prisma.InputJsonValue;
     attemptNumber: number;
-  }
+  },
+  options: { timeoutMs?: number } = {}
 ): Promise<boolean> {
   const { webhookConfigId, secret, targetUrl, jobId, eventType, payload, attemptNumber } = params;
   const body = JSON.stringify(payload);
@@ -145,7 +171,8 @@ export async function deliverWebhook(
         "X-Webhook-Timestamp": timestamp,
         "X-Webhook-Event": eventType,
       },
-      body
+      body,
+      options.timeoutMs ?? DELIVERY_TIMEOUT_MS
     );
     statusCode = res.statusCode;
     responseBody = res.text;
@@ -185,9 +212,19 @@ export async function deliverWebhook(
 }
 
 /**
+ * A failed delivery stops being worth retrying after this long. The sweep runs once a day on
+ * Vercel's Hobby plan, so this has to comfortably cover "failed yesterday, retried today" — but a
+ * week-old "job completed" notification delivered the moment someone un-pauses an endpoint is noise.
+ */
+const MAX_RETRY_AGE_MS = 36 * 60 * 60 * 1000;
+
+/**
  * Cron-driven retry sweep: re-attempts failed deliveries whose backoff window has elapsed.
  * Decoupled from the original request so delivery isn't bound by a serverless function's
  * execution window, and a receiver's transient outage doesn't permanently drop an event.
+ *
+ * Note the 30s / 5min backoff is a floor, not a schedule: the sweep itself only runs when the cron
+ * does, so a delivery is retried at the first sweep after it becomes eligible.
  */
 export async function retryFailedDeliveries(db: ScopedDb): Promise<{ attempted: number }> {
   const due = await db.webhookDelivery.findMany({
@@ -195,30 +232,46 @@ export async function retryFailedDeliveries(db: ScopedDb): Promise<{ attempted: 
     include: { webhookConfig: true },
   });
 
+  // Matching on the nextRetryAt we read means two overlapping sweeps can't both claim a row.
+  const claim = (d: { id: string; nextRetryAt: Date | null }) =>
+    db.webhookDelivery.updateMany({ where: { id: d.id, nextRetryAt: d.nextRetryAt }, data: { nextRetryAt: null } });
+
   let attempted = 0;
   for (const delivery of due) {
+    // Too old to be worth sending: close it out so it stops being "due" (and can't resurface when
+    // a paused endpoint is switched back on weeks later).
+    if (Date.now() - delivery.createdAt.getTime() > MAX_RETRY_AGE_MS) {
+      await claim(delivery);
+      continue;
+    }
+    // A paused endpoint's failures stay pending (until they age out above), so pausing for an hour
+    // doesn't throw the events away.
     if (!delivery.webhookConfig.isActive) continue;
 
     // Claim the row before retrying it. The failed attempt stays in the log as history, but it
     // must stop being "due": otherwise every later sweep would pick it up again and re-send an
-    // event that a subsequent attempt already delivered. Matching on the nextRetryAt we read also
-    // means two overlapping sweeps can't both claim the same row.
-    const claimed = await db.webhookDelivery.updateMany({
-      where: { id: delivery.id, nextRetryAt: delivery.nextRetryAt },
-      data: { nextRetryAt: null },
-    });
-    if (claimed.count === 0) continue;
+    // event that a subsequent attempt already delivered.
+    if ((await claim(delivery)).count === 0) continue;
 
     attempted += 1;
-    await deliverWebhook(db, {
-      webhookConfigId: delivery.webhookConfigId,
-      secret: delivery.webhookConfig.secret,
-      targetUrl: delivery.webhookConfig.targetUrl,
-      jobId: delivery.jobId,
-      eventType: delivery.eventType,
-      payload: delivery.payload as Prisma.InputJsonValue,
-      attemptNumber: delivery.attemptNumber + 1,
-    });
+    try {
+      await deliverWebhook(db, {
+        webhookConfigId: delivery.webhookConfigId,
+        secret: delivery.webhookConfig.secret,
+        targetUrl: delivery.webhookConfig.targetUrl,
+        jobId: delivery.jobId,
+        eventType: delivery.eventType,
+        payload: delivery.payload as Prisma.InputJsonValue,
+        attemptNumber: delivery.attemptNumber + 1,
+      });
+    } catch (err) {
+      // deliverWebhook records its own failures; reaching here means the attempt couldn't even be
+      // logged (the database was unhappy). Put the row back in the queue instead of losing the event.
+      console.error("retryFailedDeliveries: delivery threw", err);
+      await db.webhookDelivery
+        .updateMany({ where: { id: delivery.id, nextRetryAt: null }, data: { nextRetryAt: delivery.nextRetryAt } })
+        .catch(() => {});
+    }
   }
 
   return { attempted };

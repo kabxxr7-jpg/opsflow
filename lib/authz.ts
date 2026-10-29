@@ -13,6 +13,9 @@ export class ForbiddenError extends Error {
 export type Action =
   | "view:jobs"
   | "update:job:status"
+  | "view:tickets"
+  | "write:tickets"
+  | "use:intake"
   | "view:automations"
   | "manage:automations"
   | "manage:webhooks"
@@ -31,6 +34,9 @@ const GRANTS: Record<UserRole, ReadonlySet<Action>> = {
   OWNER: new Set<Action>([
     "view:jobs",
     "update:job:status",
+    "view:tickets",
+    "write:tickets",
+    "use:intake",
     "view:automations",
     "manage:automations",
     "manage:webhooks",
@@ -38,8 +44,20 @@ const GRANTS: Record<UserRole, ReadonlySet<Action>> = {
     "view:briefings",
     "generate:briefing",
   ]),
-  DISPATCHER: new Set<Action>(["view:jobs", "update:job:status", "view:briefings", "generate:briefing"]),
-  TECHNICIAN: new Set<Action>(["view:jobs", "update:job:status"]),
+  DISPATCHER: new Set<Action>([
+    "view:jobs",
+    "update:job:status",
+    "view:tickets",
+    "write:tickets",
+    "use:intake",
+    "view:briefings",
+    "generate:briefing",
+  ]),
+  // Tickets and intake are open to technicians on purpose (a tech in the field can log a customer's
+  // message or photograph a work order), but they're listed here so that stays a decision rather
+  // than something nobody checks. To narrow it, remove them from this set — pages, nav and
+  // Server Actions all read from here.
+  TECHNICIAN: new Set<Action>(["view:jobs", "update:job:status", "view:tickets", "write:tickets", "use:intake"]),
 };
 
 export function can(role: UserRole | null | undefined, action: Action): boolean {

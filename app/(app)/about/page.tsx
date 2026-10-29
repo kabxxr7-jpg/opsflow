@@ -195,8 +195,8 @@ export default function AboutPage() {
             when connecting, so a hostname can&apos;t be switched to an internal address afterwards
             (SSRF and DNS-rebinding protection). Signing secrets are write-only: once saved they&apos;re
             never shown again. Server Actions validate their input and return errors instead of
-            crashing. The AI and OCR actions are rate-limited per organization, because this login
-            page publishes working demo credentials. The built-in webhook receiver verifies
+            crashing. The AI and OCR actions are rate-limited per organization (approximately — a burst of
+            parallel requests can overshoot), because this login page publishes working demo credentials. The built-in webhook receiver verifies
             signatures, and rejects forged, tampered, and replayed requests.
           </p>
           <p>

@@ -7,3 +7,12 @@ export const SCENARIO = {
   description:
     "a 3-person HVAC, electrical, and plumbing outfit. Tickets come in by phone, chat, and email; Opsflow triages and prioritizes them, dispatches technicians, and notifies the owner by webhook when a completed job clears $500.",
 } as const;
+
+/**
+ * The only organizations the daily "simulate a day" cron may touch. That job invents tickets and
+ * jobs, completes real ones (firing real webhooks) and then *deletes* everything past a cap — fine
+ * for a demo, destructive for anyone else's data. So it runs for these slugs and nothing else;
+ * a real tenant added later is never simulated or pruned.
+ */
+export const DEMO_ORG_SLUGS = ["riverside"] as const;
+

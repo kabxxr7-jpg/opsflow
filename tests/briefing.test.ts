@@ -13,12 +13,17 @@ describe("the narrative may not state figures (the database's numbers are shown 
     "There were 12 total jobs.",
     "5 new jobs came in overnight.",
     "Only 1 job was left open.",
+    "The team finished 18 completed jobs this week.",
+    "We closed 3 total work orders.",
+    "There are 7 urgent plumbing jobs waiting.",
   ];
   const clean = [
     "Several urgent plumbing requests came in overnight and need a call back first thing.",
     "A recurring complaint about missed arrival windows is worth raising with dispatch.",
     "Ticket 7a3f is a leak. Call the customer back.", // an id fragment is not a count of jobs
     "Two of the requests mention the same address.", // words, not figures
+    "A 24 hour window of calls, mostly about water heaters.", // a number, but not a count of jobs
+    "Jobs completed today are shown above this summary.", // the word, with no figure in front of it
   ];
   for (const text of flagged) test(`flags: ${text}`, () => assert.ok(findInventedFigure(text), "should detect a figure"));
   for (const text of clean) test(`passes: ${text}`, () => assert.equal(findInventedFigure(text), null));

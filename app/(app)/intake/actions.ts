@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { assertCan } from "@/lib/authz";
 import { extractTextFromImage, OCRError } from "@/lib/ocr";
 import { classifyTicket, AIError } from "@/lib/ai";
 import { runAutomations } from "@/lib/automations";
@@ -21,6 +22,7 @@ export async function processImageIntake(formData: FormData): Promise<IntakeResu
   try {
     const session = await getSession();
     if (!session) return failure("Your session expired. Sign in again.");
+    assertCan(session, "use:intake");
     const db = await getScopedDb();
 
     // Checked first, before any of the expensive work: OCR burns real CPU and classification

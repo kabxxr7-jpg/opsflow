@@ -25,7 +25,6 @@ import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 const JOB_STATUS_ORDER = ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const;
 const RUN_OUTCOME_ORDER = ["SUCCESS", "SKIPPED", "FAILED"] as const;
 const RUN_OUTCOME_LABEL = { SUCCESS: "Success", SKIPPED: "Skipped", FAILED: "Failed" } as const;
-const NOTIFY_RULE_NAME = "Notify on job completion over $500";
 const TREND_WINDOW_DAYS = 30;
 const LOW_CONFIDENCE_THRESHOLD = 0.5;
 
@@ -78,7 +77,7 @@ async function loadJobStats(db: ScopedDb, scope: JobScope) {
 }
 
 async function loadAutomationStats(db: ScopedDb) {
-  const [ruleCount, runsByOutcome, recentRuns, recentDeliveries, notifiedCount] = await Promise.all([
+  const [ruleCount, runsByOutcome, recentRuns, recentDeliveries, notifiedJobs] = await Promise.all([
     db.automationRule.count({ where: { isActive: true } }),
     db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
     db.automationRun.findMany({
@@ -91,7 +90,10 @@ async function loadAutomationStats(db: ScopedDb) {
       take: 8,
       include: { webhookConfig: { select: { targetUrl: true } } },
     }),
-    db.automationRun.count({ where: { status: "SUCCESS", rule: { name: NOTIFY_RULE_NAME } } }),
+    // Jobs over $500 that a webhook was actually *delivered* for. Counting successful rule runs
+    // instead would overstate it: a run is logged as a success even if the endpoint it fired at
+    // was down, blocked, or didn't exist.
+    db.webhookDelivery.groupBy({ by: ["jobId"], where: { success: true, job: { revenue: { gt: 500 } } } }),
   ]);
 
   const activity: ActivityItem[] = [
@@ -119,7 +121,7 @@ async function loadAutomationStats(db: ScopedDb) {
 
   return {
     ruleCount,
-    notifiedCount,
+    notifiedCount: notifiedJobs.length,
     activity,
     runOutcomeData: RUN_OUTCOME_ORDER.map((outcome) => ({
       outcome,
@@ -178,7 +180,7 @@ export default async function DashboardPage() {
     {
       href: "/briefings",
       title: "Briefings",
-      detail: "An AI-written summary of the day's activity, checked so it can't quote figures that aren't in the data.",
+      detail: "An AI-written summary of the day's activity, checked so it doesn't state job counts or dollar amounts of its own.",
       show: showBriefings,
     },
     {
@@ -207,7 +209,7 @@ export default async function DashboardPage() {
           </p>
           {automation && automation.notifiedCount > 0 ? (
             <p className="mt-1.5 text-sm text-muted-foreground">
-              The owner was notified automatically on {plural(automation.notifiedCount, "job")} that cleared $500 —
+              A notification webhook was delivered for {plural(automation.notifiedCount, "job")} that cleared $500 —
               nobody had to remember to check.
             </p>
           ) : isTechnician ? (

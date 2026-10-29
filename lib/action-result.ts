@@ -36,6 +36,12 @@ export function toActionError(err: unknown): ActionResult {
   // distinguishing "doesn't exist" from "belongs to someone else".
   if (name === "OrgScopeError" || (err as { code?: string } | null)?.code === "P2025") return fail(NOT_FOUND);
   if (name === "UnsafeUrlError") return fail((err as Error).message);
+  // A foreign-key violation (P2003): something referencing this row appeared between a cleanup
+  // step and the final delete — e.g. an automation run landing while a rule's history is cleared.
+  // Retrying is the right answer, and "something went wrong" isn't.
+  if ((err as { code?: string } | null)?.code === "P2003") {
+    return fail("That item was just used by something else. Give it a moment and try again.");
+  }
 
   throw err;
 }

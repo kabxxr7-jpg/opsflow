@@ -123,7 +123,9 @@ exactly as it always would; there's no separate "scoped" syntax to remember or f
   point at a row in the *same* organization, so a row can't be attached to someone else's.
 - Nested relation writes (`connect`/`create` through a relation field) are rejected, since they
   would be a way around those checks. Raw SQL (`$queryRaw` and friends) is not offered on the
-  scoped client, and neither are the `User` and `Organization` models.
+  scoped client, and neither are the `User` and `Organization` models — including through a
+  relation: every `include`/`select`, however deeply nested, is walked, so
+  `job.findMany({ include: { assignedTo: true } })` can't hand back a password hash either.
 - ESLint (`eslint.config.mjs`) bans importing the raw client anywhere except the few files that
   legitimately have no tenant to scope by (login, cron, the signed integration endpoints, seed,
   tests), so the guarantee can't erode by accident.
@@ -140,11 +142,15 @@ Server Actions read, so the two can't drift apart:
 | | Owner | Dispatcher | Technician |
 |---|---|---|---|
 | Jobs: view, change status | all jobs | all jobs | only jobs assigned to them |
+| Tickets: view, create, classify | yes | yes | yes (a ticket can only be attached to a job assigned to them) |
+| Photo intake (OCR) | yes | yes | yes |
 | Briefings: view, generate | yes | yes | no |
 | Automations and Settings (webhooks) | yes | no | no |
 
 Anything not granted is denied, and every Server Action calls `assertCan()` itself — not just the
-page — so a hidden link is never the only protection. The technician rule is row-level, so it
+page — so a hidden link is never the only protection. Tickets and intake are open to technicians on
+purpose (a tech in the field can log a customer's message or photograph a work order), but that's a
+line in the matrix rather than an accident; narrowing it is a one-line change. The technician rule is row-level, so it
 lives next to the query: job lists are filtered to `assignedToId` in the query itself, and
 `assertCanUpdateJob()` checks the specific row. `tests/authz.test.ts` pins the full matrix.
 
@@ -161,7 +167,9 @@ email/password fields, they don't bypass the form; clicking one still goes throu
 `/api/cron/simulate-day`) have no user session to scope by, so they fetch every `Organization` and
 run their logic once per org via `getOrgDb(org.id)`, never a single global sweep across tenants. One
 organization failing doesn't abort the others, and in production a missing `CRON_SECRET` locks the
-endpoints rather than opening them.
+endpoints rather than opening them. The daily simulation (which invents activity and prunes old rows)
+runs only for the demo organization named in `lib/scenario.ts`, so a real tenant added later is never
+touched by it; the webhook retry sweep covers every organization.
 
 ## The automation engine: trigger → filter → action
 
@@ -218,7 +226,10 @@ Anyone who can configure an endpoint can make the server send a request, so the 
 twice (`lib/safe-url.ts`): when it's saved, and again at connect time through a custom DNS
 `lookup`, so DNS rebinding can't swap in a private address afterwards. Only public https addresses
 on standard ports are accepted; loopback, private, link-local, cloud-metadata, IPv4-mapped IPv6,
-NAT64 and 6to4 ranges are refused; redirects are never followed; the response body is capped.
+NAT64, 6to4 and IPv4-compatible ranges are refused; redirects are never followed. The whole delivery
+has one hard deadline (an endpoint that trickles bytes can't hold it open) and only the first few
+KB of a response are read. A failed delivery older than 36 hours is closed out rather than re-sent
+if its endpoint is switched back on.
 Signing secrets are write-only — never rendered back to the browser after saving.
 
 Inbound (`app/api/integrations/`): `/api/integrations/classify` and `/api/integrations/n8n-callback`
@@ -290,6 +301,18 @@ What they don't cover: the browser UI (checked by hand, plus a contrast/accessib
 light and dark at desktop and phone widths — not automated), and the live Gemini and Tesseract
 calls (the validation around them is tested; the calls themselves need keys and binaries).
 
+## A performance note worth knowing about
+
+Next's Cache Components are on, but **Partial Prefetching is deliberately off**. Measured on a
+production build with the database's statement log: with it on, a single request ran a page's
+server code twice and every sidebar link's prefetch executed the real queries for the page it
+pointed at — one dashboard view cost 52 queries across the seven linked pages, which is how the
+connection pool got exhausted on the live site. With it off, a request runs the page once (13
+queries for the dashboard) and prefetches stop at the route's `loading.tsx` skeleton, running no page
+code. Each route has its own `loading.tsx`, so a click shows the skeleton immediately. Next's build
+output recommends enabling the flag and says it becomes the default in the next major release —
+re-measure when upgrading.
+
 ## Hardening, and what's still open
 
 Done: Server Actions validate input with Zod and return failures as values (production masks
@@ -297,7 +320,10 @@ thrown messages); the AI and OCR actions are rate-limited per organization, beca
 publishes working demo credentials; responses carry `nosniff`, frame-deny, HSTS, referrer and
 permissions headers; the cron endpoints fail closed.
 
-Open, deliberately: there is **no Content-Security-Policy** (Next injects inline scripts, so a
+Open, deliberately: the per-organization rate limits are check-then-act, so a burst of parallel
+requests can overshoot them slightly, and re-classifying a ticket whose first classification failed isn't throttled at all
+(they protect the free AI quota; they aren't a security boundary); the webhook retry backoff (30 s, then 5 min) is a floor, not a schedule, because the
+sweep only runs when the daily cron does; and there is **no Content-Security-Policy** (Next injects inline scripts, so a
 useful policy needs per-request nonces); throttles are per organization, not per IP, and login has
 no lockout; sessions are 30-day stateless JWTs with no server-side revocation; and the live demo
 database was migrated by applying SQL directly, so it has no `_prisma_migrations` history — baseline

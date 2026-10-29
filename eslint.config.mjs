@@ -36,6 +36,14 @@ const eslintConfig = defineConfig([
               message: "Don't construct another client — it would bypass the org-scoping layer in lib/db.ts.",
             },
           ],
+          // `paths` only matches the exact specifier, so "../../lib/db" would slip past it.
+          patterns: [
+            {
+              group: ["**/lib/db", "**/lib/db.ts"],
+              importNames: ["rawDb"],
+              message: "Use getScopedDb()/getOrgDb() so every query is tenant-scoped, however the module is imported.",
+            },
+          ],
         },
       ],
     },

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getScopedDb, type ScopedDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { assertCan } from "@/lib/authz";
 import { runAutomations } from "@/lib/automations";
 import { classifyTicket, AIError } from "@/lib/ai";
 import { fail, OK, toActionError, type ActionResult } from "@/lib/action-result";
@@ -58,6 +59,7 @@ export async function createTicket(formData: FormData): Promise<ActionResult> {
   try {
     const session = await getSession();
     if (!session) return fail("Your session expired. Sign in again.");
+    assertCan(session, "write:tickets");
     const db = await getScopedDb();
 
     const input = parseInput(ticketInputSchema, {
@@ -67,8 +69,13 @@ export async function createTicket(formData: FormData): Promise<ActionResult> {
     });
     await assertTicketCreationAllowed(db);
 
-    if (input.jobId && !(await db.job.findUnique({ where: { id: input.jobId } }))) {
-      return fail("That job wasn't found.");
+    if (input.jobId) {
+      const job = await db.job.findUnique({ where: { id: input.jobId } });
+      // One answer for "doesn't exist" and "isn't yours", so the form can't be used to confirm a
+      // coworker's job id; a technician may only attach tickets to jobs assigned to them.
+      if (!job || (session.role === "TECHNICIAN" && job.assignedToId !== session.userId)) {
+        return fail("That job wasn't found.");
+      }
     }
 
     const ticket = await db.ticket.create({
@@ -97,6 +104,7 @@ export async function classifyTicketById(ticketId: string): Promise<ActionResult
   try {
     const session = await getSession();
     if (!session) return fail("Your session expired. Sign in again.");
+    assertCan(session, "write:tickets");
     const db = await getScopedDb();
     return await classifyAndSave(db, String(ticketId).slice(0, 64));
   } catch (err) {

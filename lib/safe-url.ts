@@ -85,7 +85,8 @@ function isBlockedV6(ip: string): boolean {
   if (!g) return true; // can't parse it, don't trust it
   const allZeroUntil = (end: number) => g.slice(0, end).every((x) => x === 0);
 
-  if (allZeroUntil(7) && (g[7] === 0 || g[7] === 1)) return true; // :: and ::1
+  if (allZeroUntil(6)) return true; // ::/96 — :: , ::1 and the deprecated IPv4-compatible form (::127.0.0.1)
+  if (allZeroUntil(4) && g[4] === 0xffff && g[5] === 0) return true; // ::ffff:0:0:0/96 (SIIT translation)
   if (allZeroUntil(5) && g[5] === 0xffff) return isBlockedV4(embeddedV4(g, 6)); // ::ffff:a.b.c.d (IPv4-mapped)
   if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return isBlockedV4(embeddedV4(g, 6)); // NAT64
   if (g[0] === 0x2002) return isBlockedV4(embeddedV4(g, 1)); // 6to4
@@ -120,7 +121,8 @@ export function parseWebhookTarget(raw: string): URL {
   }
 
   const dev = allowLoopbackForDev();
-  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // "localhost." and "metadata.google.internal." are the same hosts with a trailing root dot.
+  const host = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
   const loopbackOk = dev && isLoopbackName(host);
 
   if (url.protocol !== "https:" && !(loopbackOk && url.protocol === "http:")) {
