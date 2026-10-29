@@ -1,13 +1,13 @@
 # Opsflow Ticket Intake — n8n Workflow
 
-A real, importable n8n workflow (not an in-app simulation of one) that receives a simulated
+An importable n8n workflow (hand-written and not yet run inside n8n; not an in-app simulation of one) that receives a simulated
 customer inquiry, gets it classified by Opsflow's own AI pipeline, and either auto-creates the
 ticket or routes it to manual review depending on confidence. It calls the exact same endpoints
 Opsflow's own UI uses, no duplicate logic, no second AI integration to maintain.
 
 This is deliberately a thin artifact, not a rebuild of Opsflow's automation engine in n8n. The
 in-app rule builder (`/automations`) proves the general "design a trigger → filter → action
-system" skill. This workflow proves actual, hands-on n8n fluency: webhook triggers, Code nodes,
+system" skill. This workflow shows how those pieces map onto n8n (it has not yet been run inside n8n): webhook triggers, Code nodes,
 conditional branching, and signed HTTP calls to an external API.
 
 ## What it does

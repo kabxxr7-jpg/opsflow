@@ -8,7 +8,7 @@ const REPO_URL = "https://github.com/kabxxr7-jpg/opsflow";
 const TLDR = [
   "Reads every incoming customer message and sorts it by urgency automatically, instead of someone having to do that by hand.",
   "Notifies you the moment a completed job is worth following up on — no one has to remember to flag it.",
-  "Everything on this site is real: every classification, automation run, and briefing was produced by the actual AI and automation code, refreshed daily by a cron job — not written in to look good.",
+  "The data here is fictional and seeded (Riverside, its customers and jobs are made up); the classifications, automation runs, and briefings are produced by the actual AI and automation code, refreshed daily by a cron job — not written in to look good.",
   "Real multi-user accounts with role-based access: an Owner sees everything, Technicians only see their own assigned jobs — enforced at the database query layer, not just hidden in the UI.",
   "Each company's data is walled off from every other's, and there's an automated test suite (200+ tests) that actively tries to break that wall — reading, changing, and reaching into another company's records.",
 ];
@@ -21,7 +21,7 @@ const STACK = [
   { name: "Zod", why: "One schema per boundary: the AI's output, every Server Action's input, and the stored automation rules are all parsed rather than trusted." },
   { name: "node:test + tsx", why: "200+ tests with Node's built-in runner and no framework dependency; the isolation and webhook tests run against a real local Postgres and a real local HTTP server." },
   { name: "shadcn/ui on Base UI + Tailwind v4", why: "Component primitives, not a page builder." },
-  { name: "Vercel (hosting + cron)", why: "Two daily cron jobs: one retries failed webhook deliveries, one keeps this demo's data from going stale (see below)." },
+  { name: "Vercel (hosting + cron)", why: "Two daily cron jobs: one retries failed webhook deliveries, one keeps this demo's data from going stale." },
 ];
 
 const SCOPE_NEXT = [

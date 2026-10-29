@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: opsflow_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # A throwaway local database. The DB-backed tests refuse any non-local URL on purpose.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opsflow_ci
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/opsflow_ci
+      SESSION_SECRET: ci-session-secret-not-used-anywhere-else-0123456789abcdef
+      N8N_CALLBACK_SECRET: ci-n8n-callback-secret-0123456789abcdef
+      # The live model is never called by the tests; this only satisfies env validation.
+      GEMINI_API_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run db:seed
+      - run: npm run lint
+      - run: npm test

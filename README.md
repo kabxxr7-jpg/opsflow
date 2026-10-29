@@ -6,7 +6,7 @@
 A field-service ops automation and AI-reporting platform, built to demonstrate six specific
 skills together in one cohesive app rather than six shallow demos: production-grade multi-tenant
 auth with row-level isolation, a trigger/filter/action automation engine, AI classification with
-hallucination safeguards, signed two-way webhooks, a real (not simulated) n8n workflow, and an
+hallucination safeguards, signed two-way webhooks, an importable n8n workflow file (not yet run inside n8n), and an
 OCR-to-LLM document intake pipeline.
 
 All data is seeded/simulated, there's no real ServiceTitan, GoHighLevel, or other field-service
@@ -63,7 +63,7 @@ Next.js App Router (Server Actions + Route Handlers)
         |
         |-- Outgoing webhooks ---- signed POSTs on job status change
         |
-        '-- Incoming webhooks ---- /api/integrations/* — what the real n8n
+        '-- Incoming webhooks ---- /api/integrations/* — what the n8n
                                     workflow (integrations/n8n/) calls
 ```
 
@@ -84,11 +84,11 @@ signatures instead (see `proxy.ts`).
   what it proves: the OCR-to-LLM pipeline shape, not production-grade handwriting or non-English
   accuracy. A stronger engine (Google Document AI, AWS Textract) is a drop-in swap at one seam
   (`lib/ocr.ts`), the rest of the pipeline doesn't change.
-- **A real n8n workflow, not an in-app clone** — the in-app automation engine (`/automations`)
+- **An n8n workflow file, not an in-app clone** — the in-app automation engine (`/automations`)
   proves "I can design a trigger/filter/action data model and execution engine." Several real job
   postings this was built to answer want literal n8n experience, a different, specific claim that
-  an in-app simulation doesn't honestly support. `integrations/n8n/` is a real, importable
-  workflow that calls this app's own API.
+  an in-app simulation doesn't honestly support. `integrations/n8n/` is an importable
+  workflow (hand-written, not yet run inside n8n) that calls this app's own API.
 
 ## Multi-tenant auth: real isolation, not a login screen bolted on top
 
@@ -241,9 +241,9 @@ sign → deliver → verify loop can be demonstrated end to end: it recomputes t
 constant time, enforces the 5-minute replay window, and answers 401 to anything that doesn't
 verify (`tests/test-echo.test.ts` covers a forged signature, a tampered body and a replay).
 
-## The n8n workflow: a real artifact, not a simulation
+## The n8n workflow: a hand-written artifact, not yet run in n8n
 
-`integrations/n8n/ticket-intake-workflow.json` is an actual, importable n8n workflow: a webhook
+`integrations/n8n/ticket-intake-workflow.json` is an importable n8n workflow file: a webhook
 trigger, a validation step, a signed call to this app's classify endpoint, a confidence-based
 branch (below threshold, it's flagged for manual review instead of auto-processing, "AI
 recommends, a person decides" as an actual branch, not just a line in a proposal), and a signed
@@ -274,11 +274,11 @@ request-size limit.
 |---|---|---|
 | Multi-tenant auth, Prisma Client Extension for automatic org-scoping, role-based authorization | "Multi-user/multi-tenant SaaS," "role-based access control," security-conscious client work | `lib/db.ts`, `lib/authz.ts`, `lib/auth.ts` |
 | Automation rule engine + run log | "Zapier/ServiceTitan automation," general workflow-automation asks | `/automations`, `lib/automations.ts` |
-| A real, exported n8n workflow calling this app's own API | "n8n Developer," "n8n AI Agent" postings | `integrations/n8n/` |
+| An importable n8n workflow file (hand-written, not yet run in n8n) calling this app's own API | "n8n Developer," "n8n AI Agent" postings | `integrations/n8n/` |
 | Gemini structured extraction, grounded confidence, cited daily briefings | "AI/OpenAI integration," "daily management briefings from transcripts," hallucination-safeguard asks | `lib/ai.ts` |
 | OCR intake feeding the same AI pipeline, two confidence scores, flagged for review | "OCR + LLM extraction + flag low-confidence for human review" (document/image ingestion postings) | `/intake`, `lib/ocr.ts` |
 | HMAC-signed, retried, logged webhooks, both directions | "REST APIs," "webhooks, code steps, filters" | `lib/webhooks.ts`, `app/api/integrations/` |
-| Vendor-agnostic AI seam (`getClient()`), one line to swap providers | "Claude API" / "OpenAI" postings where the actual vendor used differs | `lib/ai.ts` |
+| All AI calls live in `lib/ai.ts`, so a provider swap touches one file | "Claude API" / "OpenAI" postings where the actual vendor used differs | `lib/ai.ts` |
 
 ## Tests
 
