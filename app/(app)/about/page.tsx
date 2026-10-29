@@ -140,7 +140,7 @@ export default function AboutPage() {
             <code className="font-mono text-foreground">lib/ai.ts</code>. It runs on Gemini&apos;s
             free tier (<code className="font-mono text-foreground">gemini-flash-lite-latest</code>,
             no card required) for cost reasons — the structured-output-plus-validation pattern
-            transfers directly to Claude&apos;s or OpenAI&apos;s equivalent modes, same seam, same
+            transfers to other providers&apos; equivalent modes (OpenAI&apos;s, for example), same seam, same
             discipline.
           </p>
         </CardContent>

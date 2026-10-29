@@ -8,8 +8,8 @@ const globalForGemini = globalThis as unknown as { gemini: GoogleGenAI | undefin
 
 // Constructed lazily (not at module scope) so the app can build and run without
 // GEMINI_API_KEY set — it's only required when ticket classification or briefings are used.
-// The one vendor-specific piece of this file is isolated here: swapping Gemini for Claude's
-// or OpenAI's structured-output mode means changing this function and MODEL only, the
+// The one vendor-specific piece of this file is isolated here: swapping Gemini for another
+// provider's structured-output mode means changing this function and MODEL only, the
 // classifyTicket/generateDailyBriefing signatures and the validation discipline don't change.
 function getClient(): GoogleGenAI {
   if (!globalForGemini.gemini) {

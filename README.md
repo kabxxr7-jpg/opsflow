@@ -208,11 +208,11 @@ back malformed. Two things go further than that project did:
   `classifyTicket` / `generateDailyBriefing`, not `classifyTicketWithGemini`. The one
   Gemini-specific thing, client construction and the model string, sits behind a single
   `getClient()` seam. This runs on Gemini for cost reasons (free tier, no card, this was a
-  self-funded build). Several of the postings this project targets specifically want Claude API
-  experience: the honest claim is that the structured-output-plus-validation pattern transfers
-  directly to Claude's or OpenAI's equivalent modes, the same seam, the same discipline, a
+  self-funded build). Several of the postings this project targets name a specific model vendor:
+  the honest claim is that the structured-output-plus-validation pattern transfers to other
+  providers' equivalent modes (OpenAI's, for example), the same seam, the same discipline, a
   different `getClient()`. That's a true, checkable statement once you read the file. Claiming
-  "built with Claude" would not be.
+  experience with a vendor that is not used here would not be.
 
 ## The webhook feature: signed, logged, retried, both directions
 
@@ -278,7 +278,7 @@ request-size limit.
 | Gemini structured extraction, grounded confidence, cited daily briefings | "AI/OpenAI integration," "daily management briefings from transcripts," hallucination-safeguard asks | `lib/ai.ts` |
 | OCR intake feeding the same AI pipeline, two confidence scores, flagged for review | "OCR + LLM extraction + flag low-confidence for human review" (document/image ingestion postings) | `/intake`, `lib/ocr.ts` |
 | HMAC-signed, retried, logged webhooks, both directions | "REST APIs," "webhooks, code steps, filters" | `lib/webhooks.ts`, `app/api/integrations/` |
-| All AI calls live in `lib/ai.ts`, so a provider swap touches one file | "Claude API" / "OpenAI" postings where the actual vendor used differs | `lib/ai.ts` |
+| All AI calls live in `lib/ai.ts`, so a provider swap touches one file | Postings that name a vendor other than Gemini | `lib/ai.ts` |
 
 ## Tests
 
