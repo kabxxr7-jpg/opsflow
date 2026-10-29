@@ -13,7 +13,13 @@ const SECURITY_HEADERS = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   cacheComponents: true,
-  partialPrefetching: true,
+  // Deliberately NOT enabling `partialPrefetching`. Measured on a production build: with it on,
+  // every request ran the page's server code twice, and each sidebar link's prefetch ran the
+  // real database queries for the page it pointed at (7 links -> ~26 queries per page view,
+  // twice) — which is how the connection pool got exhausted on the live site. With it off, a
+  // request runs the page once and prefetches stop at the route's loading.tsx boundary,
+  // executing no page code and no queries. (`next build` prints a notice recommending the flag and
+  // saying it becomes the default in the next major release — re-measure when upgrading.)
   // tesseract.js starts a worker thread from a script path it resolves relative to its own package
   // directory. Bundled, that path becomes a virtual one that doesn't exist and OCR hangs, so it
   // stays an ordinary node_modules dependency; and because nothing statically imports the worker
