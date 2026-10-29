@@ -14,10 +14,15 @@ import {
   LogOut,
   Info,
   MoreHorizontal,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import type { UserRole } from "@prisma/client";
 import { logout } from "@/app/logout/actions";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,11 +64,19 @@ function Wordmark() {
   );
 }
 
+const THEME_CYCLE = ["light", "dark", "system"] as const;
+const THEME_ICONS = { light: Sun, dark: Moon, system: Monitor } as const;
+const THEME_LABELS = { light: "Light theme", dark: "Dark theme", system: "System theme" } as const;
+
 export function Sidebar({ role }: { role: UserRole | null }) {
   const isActive = useIsActive();
+  const { theme, setTheme } = useTheme();
   const visibleLinks = LINKS.filter((l) => !l.ownerOnly || role === "OWNER");
   const bottomLinks = visibleLinks.filter((l) => BOTTOM_TABS.includes(l.href));
   const overflowLinks = visibleLinks.filter((l) => !BOTTOM_TABS.includes(l.href));
+  const currentTheme = (theme ?? "system") as (typeof THEME_CYCLE)[number];
+  const ThemeIcon = THEME_ICONS[currentTheme] ?? Monitor;
+  const cycleTheme = () => setTheme(THEME_CYCLE[(THEME_CYCLE.indexOf(currentTheme) + 1) % THEME_CYCLE.length]);
 
   return (
     <>
@@ -90,12 +103,15 @@ export function Sidebar({ role }: { role: UserRole | null }) {
             );
           })}
         </nav>
-        <form action={logout}>
-          <Button type="submit" variant="ghost" size="sm" className="w-full justify-start gap-2.5 px-2.5 text-sidebar-foreground/70">
-            <LogOut className="size-4" aria-hidden />
-            Sign out
-          </Button>
-        </form>
+        <div className="space-y-0.5 border-t pt-2">
+          <ThemeToggle />
+          <form action={logout}>
+            <Button type="submit" variant="ghost" size="sm" className="w-full justify-start gap-2.5 px-2.5 text-sidebar-foreground/70">
+              <LogOut className="size-4" aria-hidden />
+              Sign out
+            </Button>
+          </form>
+        </div>
       </aside>
 
       {/* Mobile: slim top bar (brand + overflow) */}
@@ -118,6 +134,10 @@ export function Sidebar({ role }: { role: UserRole | null }) {
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={cycleTheme}>
+                <ThemeIcon className="size-4" aria-hidden />
+                {THEME_LABELS[currentTheme]}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => logout()}>
                 <LogOut className="size-4" aria-hidden />
                 Sign out
