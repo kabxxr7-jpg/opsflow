@@ -1,5 +1,5 @@
 import { Ticket as TicketIcon, Eye } from "lucide-react";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ const PRIORITY_VARIANT: Record<string, "default" | "secondary" | "destructive" |
 const LOW_CONFIDENCE_THRESHOLD = 0.5;
 
 export default async function TicketsPage() {
+  const db = await getScopedDb();
   const tickets = await db.ticket.findMany({ orderBy: { createdAt: "desc" } });
 
   return (

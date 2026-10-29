@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Workflow, Bell, Inbox, History, Code2, Info } from "lucide-react";
 import { login } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -26,9 +26,19 @@ const PITCH_POINTS = [
   },
 ];
 
+// Real login accounts, created by prisma/seed.ts with real hashed passwords — not a bypass.
+// Listed here so a visitor can see the real multi-user/role boundary exists without needing
+// us to tell them a password over email first.
+const DEMO_ACCOUNTS = [
+  { email: "owner@riverside.demo", role: "Owner", note: "sees everything, manages automations/webhooks" },
+  { email: "tech1@riverside.demo", role: "Technician", note: "sees only their own assigned jobs" },
+];
+const DEMO_PASSWORD = "opsflow-demo-2026";
+
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState(login, undefined);
-  const demoHint = process.env.NEXT_PUBLIC_DEMO_HINT;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-secondary/40 to-background p-4">
@@ -87,9 +97,8 @@ export default function LoginPage() {
             ))}
           </ul>
           <p className="text-sm font-medium text-foreground">
-            This isn&apos;t a mockup — the dates span a simulated month of business, but every
-            classification and automation run behind them was produced by the app&apos;s real
-            code, refreshed daily by a cron job (see{" "}
+            This isn&apos;t a mockup — real accounts, real roles, real org-scoped data isolation
+            (see{" "}
             <a href="/about" className="underline underline-offset-2 hover:text-primary">
               /about
             </a>
@@ -104,20 +113,56 @@ export default function LoginPage() {
               Opsflow
             </CardTitle>
             <CardTitle className="hidden md:block">Sign in</CardTitle>
-            <CardDescription>
-              Field-service ops automation + AI reporting demo.
-              {demoHint ? (
-                <span className="mt-2 block text-xs text-muted-foreground">
-                  Demo password: <code className="font-mono">{demoHint}</code>
-                </span>
-              ) : null}
-            </CardDescription>
+            <CardDescription>Field-service ops automation + AI reporting demo.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-1.5 rounded-md border bg-muted/30 p-2.5">
+              <p className="text-xs font-medium text-foreground">Demo accounts</p>
+              {DEMO_ACCOUNTS.map((acct) => (
+                <button
+                  key={acct.email}
+                  type="button"
+                  onClick={() => {
+                    setEmail(acct.email);
+                    setPassword(DEMO_PASSWORD);
+                  }}
+                  className="flex w-full items-center justify-between rounded px-1.5 py-1 text-left text-xs transition-colors hover:bg-accent"
+                >
+                  <span>
+                    <span className="font-medium text-foreground">{acct.role}</span>{" "}
+                    <span className="text-muted-foreground">— {acct.note}</span>
+                  </span>
+                  <span className="font-mono text-muted-foreground">{acct.email}</span>
+                </button>
+              ))}
+              <p className="px-1.5 text-[11px] text-muted-foreground">
+                Password for both: <code className="font-mono">{DEMO_PASSWORD}</code> — clicking
+                an account fills the form, it does not skip real authentication.
+              </p>
+            </div>
             <form action={formAction} className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  required
+                  autoFocus
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <Input id="password" name="password" type="password" required autoFocus />
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
               </div>
               {state?.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
               <Button type="submit" className="w-full" disabled={pending}>

@@ -1,5 +1,5 @@
-import { db } from "@/lib/db";
 import type { Job, Ticket } from "@prisma/client";
+import type { ScopedDb } from "@/lib/db";
 import { triggerWebhooksForJobStatusChange } from "@/lib/webhooks";
 
 type AutomationEvent =
@@ -56,8 +56,12 @@ function matchesTrigger(trigger: RuleTrigger, event: AutomationEvent): boolean {
  * Webhook actions trigger real signed delivery (lib/webhooks.ts) for job.status_changed
  * events, matched against WebhookConfig.triggerOn. Ticket-triggered rules don't have a
  * webhook delivery path yet — WebhookConfig is keyed on JobStatus, not ticket events.
+ *
+ * Takes `db` explicitly (org-scoped, from getScopedDb()/getOrgDb()) rather than importing a
+ * global client — this function runs inside both real user sessions and the no-session cron,
+ * and must never guess which organization it's operating on.
  */
-export async function runAutomations(event: AutomationEvent): Promise<void> {
+export async function runAutomations(db: ScopedDb, event: AutomationEvent): Promise<void> {
   const rules = await db.automationRule.findMany({ where: { isActive: true } });
   if (rules.length === 0) return;
 
@@ -78,6 +82,7 @@ export async function runAutomations(event: AutomationEvent): Promise<void> {
           jobId: jobId ?? undefined,
           status: "SKIPPED",
           log: "Trigger matched but filter conditions did not.",
+          organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
         },
       });
       continue;
@@ -104,7 +109,7 @@ export async function runAutomations(event: AutomationEvent): Promise<void> {
             logs.push("Webhook action skipped: job record not found.");
             continue;
           }
-          await triggerWebhooksForJobStatusChange({
+          await triggerWebhooksForJobStatusChange(db, {
             jobId: jobWithCustomer.id,
             jobType: jobWithCustomer.jobType,
             customerName: jobWithCustomer.customer.name,
@@ -127,6 +132,7 @@ export async function runAutomations(event: AutomationEvent): Promise<void> {
         jobId: jobId ?? undefined,
         status: runStatus,
         log: logs.join(" "),
+        organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
       },
     });
   }

@@ -15,6 +15,7 @@ import {
   Info,
   MoreHorizontal,
 } from "lucide-react";
+import type { UserRole } from "@prisma/client";
 import { logout } from "@/app/logout/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,14 +28,14 @@ import {
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/tickets", label: "Tickets", icon: Ticket },
-  { href: "/intake", label: "Intake", icon: Upload },
-  { href: "/automations", label: "Automations", icon: Zap },
-  { href: "/briefings", label: "Briefings", icon: Sparkles },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/about", label: "About", icon: Info },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, ownerOnly: false },
+  { href: "/jobs", label: "Jobs", icon: Briefcase, ownerOnly: false },
+  { href: "/tickets", label: "Tickets", icon: Ticket, ownerOnly: false },
+  { href: "/intake", label: "Intake", icon: Upload, ownerOnly: false },
+  { href: "/automations", label: "Automations", icon: Zap, ownerOnly: true },
+  { href: "/briefings", label: "Briefings", icon: Sparkles, ownerOnly: false },
+  { href: "/settings", label: "Settings", icon: Settings, ownerOnly: true },
+  { href: "/about", label: "About", icon: Info, ownerOnly: false },
 ];
 
 // The five most-used destinations get a thumb-reachable bottom tab; the rest live in the "More"
@@ -58,10 +59,11 @@ function Wordmark() {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ role }: { role: UserRole | null }) {
   const isActive = useIsActive();
-  const bottomLinks = LINKS.filter((l) => BOTTOM_TABS.includes(l.href));
-  const overflowLinks = LINKS.filter((l) => !BOTTOM_TABS.includes(l.href));
+  const visibleLinks = LINKS.filter((l) => !l.ownerOnly || role === "OWNER");
+  const bottomLinks = visibleLinks.filter((l) => BOTTOM_TABS.includes(l.href));
+  const overflowLinks = visibleLinks.filter((l) => !BOTTOM_TABS.includes(l.href));
 
   return (
     <>
@@ -71,7 +73,7 @@ export function Sidebar() {
           <Wordmark />
         </div>
         <nav className="flex flex-1 flex-col gap-0.5">
-          {LINKS.map((link) => {
+          {visibleLinks.map((link) => {
             const active = isActive(link.href);
             return (
               <Link

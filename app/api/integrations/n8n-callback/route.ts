@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { verifySignature } from "@/lib/webhooks";
-import { db } from "@/lib/db";
+import { rawDb, getOrgDb } from "@/lib/db";
 import { runAutomations } from "@/lib/automations";
 
 const bodySchema = z.object({
@@ -62,6 +62,16 @@ export async function POST(request: NextRequest) {
 
   const data = parsedBody.data;
 
+  // No browser session here — N8N_CALLBACK_SECRET is currently one global secret (not yet
+  // per-organization), which in practice means one organization. Resolved via lookup, not
+  // trusted from the request body, same "never take organizationId from the client" rule the
+  // scoping layer itself follows.
+  const org = await rawDb.organization.findFirst({ select: { id: true } });
+  if (!org) {
+    return NextResponse.json({ error: "No organization configured." }, { status: 500 });
+  }
+  const db = getOrgDb(org.id);
+
   // Same grounding check as the in-app classify path: don't persist a snippet the model
   // (or in this case, the upstream n8n call) claims came from the text if it actually didn't.
   const sourceSnippet = data.rawText.includes(data.sourceSnippet) ? data.sourceSnippet : null;
@@ -70,6 +80,7 @@ export async function POST(request: NextRequest) {
     data: {
       rawText: data.rawText,
       source: data.source,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
       classification: data.classification,
       priority: data.priority,
       summary: data.summary,
@@ -78,7 +89,7 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  await runAutomations({ type: "ticket.created", ticket });
+  await runAutomations(db, { type: "ticket.created", ticket });
 
   return NextResponse.json({ id: ticket.id }, { status: 201 });
 }

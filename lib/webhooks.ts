@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { db } from "@/lib/db";
 import type { JobStatus, Prisma } from "@prisma/client";
+import type { ScopedDb } from "@/lib/db";
 
 export interface JobStatusChangeEvent {
   jobId: string;
@@ -57,15 +57,18 @@ function nextRetryDelayMs(failedAttemptNumber: number): number | null {
   return null;
 }
 
-export async function deliverWebhook(params: {
-  webhookConfigId: string;
-  secret: string;
-  targetUrl: string;
-  jobId: string | null;
-  eventType: string;
-  payload: Prisma.InputJsonValue;
-  attemptNumber: number;
-}): Promise<boolean> {
+export async function deliverWebhook(
+  db: ScopedDb,
+  params: {
+    webhookConfigId: string;
+    secret: string;
+    targetUrl: string;
+    jobId: string | null;
+    eventType: string;
+    payload: Prisma.InputJsonValue;
+    attemptNumber: number;
+  }
+): Promise<boolean> {
   const { webhookConfigId, secret, targetUrl, jobId, eventType, payload, attemptNumber } = params;
   const body = JSON.stringify(payload);
   const timestamp = new Date().toISOString();
@@ -105,6 +108,7 @@ export async function deliverWebhook(params: {
     data: {
       webhookConfigId,
       jobId,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
       eventType,
       payload,
       attemptNumber,
@@ -129,7 +133,7 @@ export async function deliverWebhook(params: {
  * Decoupled from the original request so delivery isn't bound by a serverless function's
  * execution window, and a receiver's transient outage doesn't permanently drop an event.
  */
-export async function retryFailedDeliveries(): Promise<{ attempted: number }> {
+export async function retryFailedDeliveries(db: ScopedDb): Promise<{ attempted: number }> {
   const due = await db.webhookDelivery.findMany({
     where: { success: false, attemptNumber: { lt: 3 }, nextRetryAt: { lte: new Date() } },
     include: { webhookConfig: true },
@@ -139,7 +143,7 @@ export async function retryFailedDeliveries(): Promise<{ attempted: number }> {
   for (const delivery of due) {
     if (!delivery.webhookConfig.isActive) continue;
     attempted += 1;
-    await deliverWebhook({
+    await deliverWebhook(db, {
       webhookConfigId: delivery.webhookConfigId,
       secret: delivery.webhookConfig.secret,
       targetUrl: delivery.webhookConfig.targetUrl,
@@ -153,7 +157,7 @@ export async function retryFailedDeliveries(): Promise<{ attempted: number }> {
   return { attempted };
 }
 
-export async function triggerWebhooksForJobStatusChange(event: JobStatusChangeEvent): Promise<void> {
+export async function triggerWebhooksForJobStatusChange(db: ScopedDb, event: JobStatusChangeEvent): Promise<void> {
   const configs = await db.webhookConfig.findMany({
     where: { isActive: true, triggerOn: { has: event.toStatus } },
   });
@@ -173,7 +177,7 @@ export async function triggerWebhooksForJobStatusChange(event: JobStatusChangeEv
 
   await Promise.all(
     configs.map((config) =>
-      deliverWebhook({
+      deliverWebhook(db, {
         webhookConfigId: config.id,
         secret: config.secret,
         targetUrl: config.targetUrl,

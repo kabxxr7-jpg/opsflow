@@ -1,5 +1,6 @@
-import { CheckCircle2, Info, Plus, Settings as SettingsIcon, XCircle } from "lucide-react";
-import { db } from "@/lib/db";
+import { CheckCircle2, Info, Plus, Settings as SettingsIcon, ShieldAlert, XCircle } from "lucide-react";
+import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,17 @@ import { WebhookFormDialog } from "@/components/webhook-form-dialog";
 import { WebhookRowActions } from "@/components/webhook-row-actions";
 
 export default async function SettingsPage() {
+  const session = await getSession();
+  if (!session) return null;
+  if (session.role !== "OWNER") {
+    return (
+      <div className="flex flex-col items-center gap-2 py-16 text-center">
+        <ShieldAlert className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-muted-foreground">Settings are visible to the account owner only.</p>
+      </div>
+    );
+  }
+  const db = await getScopedDb();
   const webhooks = await db.webhookConfig.findMany({
     orderBy: { createdAt: "desc" },
     include: { deliveries: { orderBy: { createdAt: "desc" }, take: 5 } },

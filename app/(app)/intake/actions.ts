@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
 import { extractTextFromImage, OCRError } from "@/lib/ocr";
 import { classifyTicket, AIError } from "@/lib/ai";
 import { runAutomations } from "@/lib/automations";
@@ -35,6 +35,8 @@ export async function processImageIntake(
     return { error: "Unexpected error reading this image.", ticketId: null };
   }
 
+  const db = await getScopedDb();
+
   // Create the ticket from the OCR text first, even if classification fails below, a low-
   // confidence or garbled OCR result should still be visible for human review, not dropped.
   let ticket = await db.ticket.create({
@@ -42,6 +44,7 @@ export async function processImageIntake(
       rawText: ocrText,
       source: "ocr_upload",
       ocrConfidence,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
     },
   });
 
@@ -65,7 +68,7 @@ export async function processImageIntake(
     }
   }
 
-  await runAutomations({ type: "ticket.created", ticket });
+  await runAutomations(db, { type: "ticket.created", ticket });
 
   revalidatePath("/intake");
   revalidatePath("/tickets");

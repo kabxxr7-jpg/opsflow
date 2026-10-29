@@ -11,7 +11,8 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import { SCENARIO } from "@/lib/scenario";
@@ -55,6 +56,14 @@ type ActivityItem = {
 };
 
 export default async function DashboardPage() {
+  const session = await getSession();
+  if (!session) return null;
+  const db = await getScopedDb();
+
+  // Owners/dispatchers see org-wide job numbers; a technician's hero metric and charts reflect
+  // only their own assigned jobs — same row-level rule the Jobs page itself enforces.
+  const technicianScope = session.role === "TECHNICIAN" ? { assignedToId: session.userId } : {};
+
   const [
     jobCount,
     openJobs,
@@ -69,19 +78,19 @@ export default async function DashboardPage() {
     notifyRule,
     completedJobs,
   ] = await Promise.all([
-    db.job.count(),
-    db.job.count({ where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
+    db.job.count({ where: technicianScope }),
+    db.job.count({ where: { ...technicianScope, status: { in: ["SCHEDULED", "IN_PROGRESS"] } } }),
     db.ticket.count(),
     db.automationRule.count({ where: { isActive: true } }),
     db.automationRun.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { rule: true } }),
     db.webhookDelivery.findMany({ orderBy: { createdAt: "desc" }, take: 8, include: { webhookConfig: true } }),
-    db.job.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.job.groupBy({ by: ["status"], where: technicianScope, _count: { _all: true } }),
     db.automationRun.groupBy({ by: ["status"], _count: { _all: true } }),
     db.ticket.count({ where: { confidence: { lt: 0.5 } } }),
-    db.job.aggregate({ where: { status: "COMPLETED" }, _sum: { revenue: true }, _count: true }),
+    db.job.aggregate({ where: { ...technicianScope, status: "COMPLETED" }, _sum: { revenue: true }, _count: true }),
     db.automationRule.findFirst({ where: { name: NOTIFY_RULE_NAME } }),
     db.job.findMany({
-      where: { status: "COMPLETED", completedAt: { not: null } },
+      where: { ...technicianScope, status: "COMPLETED", completedAt: { not: null } },
       select: { completedAt: true, revenue: true },
     }),
   ]);

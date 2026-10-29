@@ -1,5 +1,5 @@
 import { Briefcase, DollarSign, Sparkles, TrendingUp, AlertTriangle, Clock, ThumbsUp } from "lucide-react";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GenerateBriefingButton } from "@/components/generate-briefing-button";
 import { EmptyState } from "@/components/empty-state";
@@ -20,6 +20,7 @@ const HIGHLIGHT_STYLE: Record<Highlight["type"], { icon: typeof TrendingUp; bord
 };
 
 export default async function BriefingsPage() {
+  const db = await getScopedDb();
   const briefings = await db.dailyBriefing.findMany({ orderBy: { date: "desc" } });
 
   const dayStats = await Promise.all(

@@ -1,16 +1,25 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { PrismaClient, JobStatus } from "@prisma/client";
+import { getOrgDb } from "../lib/db";
+import { hashPassword } from "../lib/password";
 import { runAutomations } from "../lib/automations";
 import { classifyTicket, generateDailyBriefing, AIError } from "../lib/ai";
 import { extractTextFromImage } from "../lib/ocr";
 
-const db = new PrismaClient();
+const rawDb = new PrismaClient();
 
 // All seed "history" below (automation runs, webhook deliveries, ticket classifications, the
 // daily briefing) is produced by calling the app's real functions, the same ones a live user
 // triggers by clicking around, not by writing fabricated AI output directly into the database.
 // Slower to seed, but it means every number on a freshly-seeded demo is genuinely real.
+//
+// Multi-tenant: creates one real Organization and three real login accounts (owner + two
+// technicians, real hashed passwords) and writes every tenant row through getOrgDb(org.id) —
+// the same scoped-client path a real session uses, not a bypass.
+
+const ORG_SLUG = "riverside";
+const DEMO_PASSWORD = "opsflow-demo-2026";
 
 const CUSTOMERS = [
   { name: "Maria Chen", phone: "555-0101", email: "maria.chen@example.com", address: "412 Oak St" },
@@ -21,9 +30,12 @@ const CUSTOMERS = [
 ];
 
 const TECHNICIANS = [
-  { name: "Jamie Rourke", skills: ["HVAC", "Electrical"] },
-  { name: "Priya Nair", skills: ["Plumbing", "HVAC"] },
-  { name: "Tom Baxter", skills: ["Electrical", "General Repair"] },
+  { name: "Jamie Rourke", skills: ["HVAC", "Electrical"], userEmail: "tech1@riverside.demo" },
+  { name: "Priya Nair", skills: ["Plumbing", "HVAC"], userEmail: "tech2@riverside.demo" },
+  // Tom Baxter is a roster/crew record only — no login account, same as a real business that
+  // hasn't onboarded every technician to the portal yet. Still gets assigned jobs, just can't
+  // be the one to log in and see them.
+  { name: "Tom Baxter", skills: ["Electrical", "General Repair"], userEmail: null },
 ];
 
 const JOB_TYPES = ["HVAC repair", "HVAC install", "Plumbing inspection", "Electrical repair", "Routine maintenance"];
@@ -83,47 +95,53 @@ function daysAgoDate(days: number, hourOffset = 0): Date {
   return d;
 }
 
-async function classifyAndLog(ticketId: string, rawText: string) {
-  try {
-    const result = await classifyTicket(rawText);
-    const updated = await db.ticket.update({
-      where: { id: ticketId },
-      data: {
-        classification: result.classification,
-        priority: result.priority,
-        summary: result.summary,
-        confidence: result.confidence,
-        sourceSnippet: result.sourceSnippet,
-      },
-    });
-    await runAutomations({ type: "ticket.created", ticket: updated });
-    return updated;
-  } catch (err) {
-    if (err instanceof AIError) {
-      console.warn(`  (left unclassified, ${err.kind}: ${err.message})`);
-    } else {
-      throw err;
-    }
-    return null;
-  }
-}
-
 async function main() {
   console.log("Seeding opsflow...");
 
-  await db.dailyBriefing.deleteMany();
-  await db.webhookDelivery.deleteMany();
-  await db.webhookConfig.deleteMany();
-  await db.automationRun.deleteMany();
-  await db.automationRule.deleteMany();
-  await db.ticket.deleteMany();
-  await db.job.deleteMany();
-  await db.technician.deleteMany();
-  await db.customer.deleteMany();
-  await db.profile.deleteMany();
+  // Wipe in FK-safe order. Organization delete cascades to every tenant table, but User doesn't
+  // cascade-delete Organization the other way, so this is still explicit and ordered.
+  await rawDb.user.deleteMany();
+  await rawDb.organization.deleteMany({ where: { slug: ORG_SLUG } });
 
-  const customers = await Promise.all(CUSTOMERS.map((c) => db.customer.create({ data: c })));
-  const technicians = await Promise.all(TECHNICIANS.map((t) => db.technician.create({ data: t })));
+  const org = await rawDb.organization.create({ data: { name: "Riverside Home Services", slug: ORG_SLUG } });
+  const db = getOrgDb(org.id);
+
+  const owner = await rawDb.user.create({
+    data: {
+      organizationId: org.id,
+      email: "owner@riverside.demo",
+      passwordHash: hashPassword(DEMO_PASSWORD),
+      name: "Alex Rivera",
+      role: "OWNER",
+    },
+  });
+  void owner;
+
+  const customers = await Promise.all(
+    CUSTOMERS.map((c) => db.customer.create({ data: { ...c, organizationId: "" } })) // overwritten by org-scope extension
+  );
+
+  const technicians = await Promise.all(
+    TECHNICIANS.map(async (t) => {
+      const technician = await db.technician.create({
+        data: { name: t.name, skills: t.skills, organizationId: "" }, // overwritten by org-scope extension
+      });
+      let userId: string | null = null;
+      if (t.userEmail) {
+        const user = await rawDb.user.create({
+          data: {
+            organizationId: org.id,
+            email: t.userEmail,
+            passwordHash: hashPassword(DEMO_PASSWORD),
+            name: t.name,
+            role: "TECHNICIAN",
+          },
+        });
+        userId = user.id;
+      }
+      return { ...technician, userId };
+    })
+  );
 
   // Rules and the webhook target exist before any job/ticket does, so every event below runs
   // against the same live rule set a real user would see on /automations.
@@ -134,6 +152,7 @@ async function main() {
       trigger: { type: "job.status_changed", status: "COMPLETED" },
       filters: [{ field: "revenue", op: "gt", value: 500 }],
       actions: [{ type: "webhook" }],
+      organizationId: "", // overwritten by org-scope extension
     },
   });
 
@@ -144,6 +163,7 @@ async function main() {
       trigger: { type: "ticket.created" },
       filters: [{ field: "priority", op: "eq", value: "URGENT" }],
       actions: [{ type: "tag", value: "needs-review" }],
+      organizationId: "", // overwritten by org-scope extension
     },
   });
 
@@ -154,6 +174,7 @@ async function main() {
       secret: "demo-webhook-secret-change-me",
       isActive: true,
       triggerOn: ["COMPLETED"],
+      organizationId: "", // overwritten by org-scope extension
     },
   });
   console.log(`Webhook deliveries will target ${appBaseUrl} — run the dev server first if seeding locally.`);
@@ -167,11 +188,14 @@ async function main() {
     const status: JobStatus = forceToday ? "COMPLETED" : pick(statuses);
     const scheduledAt = forceToday ? daysAgoDate(0, 6 - i * 2) : daysAgoDate(Math.floor(Math.random() * 30));
     const revenue = status === "COMPLETED" ? (forceToday ? 540 + Math.random() * 300 : 80 + Math.random() * 700) : null;
+    const technician = Math.random() > 0.15 ? pick(technicians) : null;
 
     const job = await db.job.create({
       data: {
         customerId: pick(customers).id,
-        technicianId: Math.random() > 0.15 ? pick(technicians).id : null,
+        technicianId: technician?.id ?? null,
+        assignedToId: technician?.userId ?? null,
+        organizationId: "", // overwritten by org-scope extension
         jobType: pick(JOB_TYPES),
         status,
         scheduledAt,
@@ -185,7 +209,32 @@ async function main() {
     if (status === "COMPLETED") {
       // Real automation evaluation: fires the $500+ rule for real, including an actual signed
       // HTTP delivery attempt to the webhook target above.
-      await runAutomations({ type: "job.status_changed", job });
+      await runAutomations(db, { type: "job.status_changed", job });
+    }
+  }
+
+  async function classifyAndLog(ticketId: string, rawText: string) {
+    try {
+      const result = await classifyTicket(rawText);
+      const updated = await db.ticket.update({
+        where: { id: ticketId },
+        data: {
+          classification: result.classification,
+          priority: result.priority,
+          summary: result.summary,
+          confidence: result.confidence,
+          sourceSnippet: result.sourceSnippet,
+        },
+      });
+      await runAutomations(db, { type: "ticket.created", ticket: updated });
+      return updated;
+    } catch (err) {
+      if (err instanceof AIError) {
+        console.warn(`  (left unclassified, ${err.kind}: ${err.message})`);
+      } else {
+        throw err;
+      }
+      return null;
     }
   }
 
@@ -202,9 +251,10 @@ async function main() {
         rawText: template.text,
         source: template.source,
         createdAt: daysAgoDate(template.daysAgo, template.daysAgo === 0 ? 3 : 0),
+        organizationId: "", // overwritten by org-scope extension
       },
     });
-    await runAutomations({ type: "ticket.created", ticket });
+    await runAutomations(db, { type: "ticket.created", ticket });
 
     if (!template.leaveUnclassified) {
       await classifyAndLog(ticket.id, template.text);
@@ -225,19 +275,18 @@ async function main() {
         source: "ocr_upload",
         ocrConfidence: ocrResult.confidence,
         createdAt: daysAgoDate(0, 1),
+        organizationId: "", // overwritten by org-scope extension
       },
     });
-    await runAutomations({ type: "ticket.created", ticket: ocrTicket });
+    await runAutomations(db, { type: "ticket.created", ticket: ocrTicket });
     await classifyAndLog(ocrTicket.id, ocrResult.text);
   } catch (err) {
     console.warn("  (skipped OCR-sourced ticket:", err instanceof Error ? err.message : err, ")");
   }
 
-  await db.profile.create({ data: {} });
-
   try {
     console.log("Generating today's briefing via Gemini...");
-    await generateDailyBriefing();
+    await generateDailyBriefing(db);
   } catch (err) {
     console.warn("  (skipped daily briefing:", err instanceof Error ? err.message : err, ")");
   }
@@ -248,10 +297,17 @@ async function main() {
     db.ticket.count({ where: { classification: { not: null } } }),
   ]);
 
+  const loginAccounts = [
+    { email: "owner@riverside.demo", role: "OWNER" },
+    ...TECHNICIANS.filter((t) => t.userEmail).map((t) => ({ email: t.userEmail as string, role: "TECHNICIAN" })),
+  ];
+
   console.log(
-    `Seeded ${customers.length} customers, ${technicians.length} technicians, ${jobs.length} jobs, ` +
-      `${TICKET_TEMPLATES.length + 1} tickets (${classifiedCount} classified), ${runCount} automation runs, ` +
-      `${deliveryCount} webhook deliveries.`
+    `Seeded org "${org.slug}" with ${loginAccounts.length} login accounts (${loginAccounts
+      .map((a) => `${a.email} [${a.role}]`)
+      .join(", ")}, password "${DEMO_PASSWORD}" for all), ${customers.length} customers, ` +
+      `${technicians.length} technicians, ${jobs.length} jobs, ${TICKET_TEMPLATES.length + 1} tickets ` +
+      `(${classifiedCount} classified), ${runCount} automation runs, ${deliveryCount} webhook deliveries.`
   );
 }
 
@@ -261,5 +317,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await db.$disconnect();
+    await rawDb.$disconnect();
   });

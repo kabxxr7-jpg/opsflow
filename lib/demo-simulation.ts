@@ -1,23 +1,17 @@
-import { db } from "@/lib/db";
 import { runAutomations } from "@/lib/automations";
 import { classifyTicket, AIError } from "@/lib/ai";
 import type { Job, JobStatus } from "@prisma/client";
+import type { ScopedDb } from "@/lib/db";
 
 // Run once daily by app/api/cron/simulate-day/route.ts so the live demo never looks frozen on
 // the date it was last seeded. Every call here is the same real function a live user triggers
 // by clicking around (classifyTicket, runAutomations) — this just triggers a few of them
-// automatically each day, the same way prisma/seed.ts does at setup time.
+// automatically each day, the same way prisma/seed.ts does at setup time. Takes `db` (one
+// organization's scoped client) explicitly — the cron iterates every Organization and calls
+// this once per org, never assuming there's only one tenant.
 
 const MAX_TICKETS = 24;
 const MAX_JOBS = 22;
-
-const CUSTOMERS = [
-  { name: "Maria Chen", phone: "555-0101", email: "maria.chen@example.com", address: "412 Oak St" },
-  { name: "Devon Patel", phone: "555-0102", email: "devon.patel@example.com", address: "88 Birch Ave" },
-  { name: "Sarah Okafor", phone: "555-0103", email: "sarah.okafor@example.com", address: "27 Maple Dr" },
-  { name: "Luis Fernandez", phone: "555-0104", email: "luis.fernandez@example.com", address: "901 Cedar Ln" },
-  { name: "Grace Kim", phone: "555-0105", email: "grace.kim@example.com", address: "15 Pine Ct" },
-];
 
 const JOB_TYPES = ["HVAC repair", "HVAC install", "Plumbing inspection", "Electrical repair", "Routine maintenance"];
 
@@ -61,7 +55,7 @@ function sample<T>(arr: T[], count: number): T[] {
   return out;
 }
 
-async function classifyAndLog(ticketId: string, rawText: string) {
+async function classifyAndLog(db: ScopedDb, ticketId: string, rawText: string) {
   try {
     const result = await classifyTicket(rawText);
     const updated = await db.ticket.update({
@@ -74,7 +68,7 @@ async function classifyAndLog(ticketId: string, rawText: string) {
         sourceSnippet: result.sourceSnippet,
       },
     });
-    await runAutomations({ type: "ticket.created", ticket: updated });
+    await runAutomations(db, { type: "ticket.created", ticket: updated });
   } catch (err) {
     if (!(err instanceof AIError)) throw err;
     // Left unclassified — a transient Gemini error shouldn't fail the whole cron run.
@@ -82,7 +76,7 @@ async function classifyAndLog(ticketId: string, rawText: string) {
 }
 
 /** Creates 1-2 new tickets through the real classify + automations pipeline, dated today. */
-export async function createFreshTickets(count: number): Promise<number> {
+export async function createFreshTickets(db: ScopedDb, count: number): Promise<number> {
   const jobs = await db.job.findMany();
   const templates = sample(FRESH_TICKET_TEMPLATES, count);
 
@@ -92,16 +86,17 @@ export async function createFreshTickets(count: number): Promise<number> {
         jobId: jobs.length > 0 && Math.random() > 0.4 ? pick(jobs).id : null,
         rawText: template.text,
         source: template.source,
+        organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
       },
     });
-    await runAutomations({ type: "ticket.created", ticket });
-    await classifyAndLog(ticket.id, template.text);
+    await runAutomations(db, { type: "ticket.created", ticket });
+    await classifyAndLog(db, ticket.id, template.text);
   }
   return templates.length;
 }
 
 /** Creates one new SCHEDULED job a few days out, so "Total jobs" moves over time too. */
-export async function createFreshJob(): Promise<Job | null> {
+export async function createFreshJob(db: ScopedDb): Promise<Job | null> {
   const [customers, technicians] = await Promise.all([db.customer.findMany(), db.technician.findMany()]);
   if (customers.length === 0) return null;
 
@@ -112,6 +107,7 @@ export async function createFreshJob(): Promise<Job | null> {
     data: {
       customerId: pick(customers).id,
       technicianId: technicians.length > 0 && Math.random() > 0.15 ? pick(technicians).id : null,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
       jobType: pick(JOB_TYPES),
       status: "SCHEDULED",
       scheduledAt,
@@ -120,7 +116,7 @@ export async function createFreshJob(): Promise<Job | null> {
 }
 
 /** Advances a few SCHEDULED/IN_PROGRESS jobs to COMPLETED today, firing real automations. */
-export async function advanceJobs(count: number): Promise<number> {
+export async function advanceJobs(db: ScopedDb, count: number): Promise<number> {
   const candidates = await db.job.findMany({
     where: { status: { in: ["SCHEDULED", "IN_PROGRESS"] as JobStatus[] } },
     take: 10,
@@ -133,7 +129,7 @@ export async function advanceJobs(count: number): Promise<number> {
       where: { id: job.id },
       data: { status: "COMPLETED", completedAt: new Date(), revenue, notes: "Job completed, parts and labor as scoped." },
     });
-    await runAutomations({ type: "job.status_changed", job: updated });
+    await runAutomations(db, { type: "job.status_changed", job: updated });
   }
   return toAdvance.length;
 }
@@ -141,7 +137,7 @@ export async function advanceJobs(count: number): Promise<number> {
 /** Keeps the demo from growing unbounded — deletes the oldest rows past a cap. Safe: every FK
  *  Ticket/Job participates in (AutomationRun.jobId, WebhookDelivery.jobId) is optional and
  *  defaults to SetNull on delete, so pruning never violates a constraint. */
-export async function pruneOldRecords(): Promise<{ tickets: number; jobs: number }> {
+export async function pruneOldRecords(db: ScopedDb): Promise<{ tickets: number; jobs: number }> {
   const [ticketCount, jobCount] = await Promise.all([db.ticket.count(), db.job.count()]);
 
   let prunedTickets = 0;

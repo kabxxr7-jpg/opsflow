@@ -7,7 +7,7 @@ const TLDR = [
   "Reads every incoming customer message and sorts it by urgency automatically, instead of someone having to do that by hand.",
   "Notifies you the moment a completed job is worth following up on — no one has to remember to flag it.",
   "Everything on this site is real: every classification, automation run, and briefing was produced by the actual AI and automation code, refreshed daily by a cron job — not written in to look good.",
-  "This proves the automation + AI engine works end to end. Voice agents, multi-agent AI, and multi-user accounts aren't built — the technical sections below explain why, and what a real engagement would add.",
+  "Real multi-user accounts with role-based access: an Owner sees everything, Technicians only see their own assigned jobs — enforced at the database query layer, not just hidden in the UI.",
 ];
 
 const STACK = [
@@ -25,8 +25,8 @@ const SCOPE_NEXT = [
     body: "Several job postings this was built to answer mention these, but each is independently a bigger build than everything in this project combined. A shallow version would read as padding to exactly the audience evaluating it — next step for a real engagement, not bolted onto this one.",
   },
   {
-    title: "Multi-user accounts",
-    body: "Single-password gate, no userId scoping, by design for a single-tenant demo. A real deployment adds proper auth and per-account data isolation at the Prisma/session layer — no architectural rework needed, just added scope.",
+    title: "Multi-organization (SaaS-style) onboarding",
+    body: "The schema and query-scoping layer (lib/db.ts) already support any number of organizations — every tenant table carries organizationId, and a Prisma Client Extension injects it on every query automatically. What's not built is self-serve signup; today, organizations are created by seed.ts, not a signup flow.",
   },
   {
     title: "Production-grade OCR",
@@ -146,13 +146,29 @@ export default function AboutPage() {
             Auth model
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          A single shared password gates the whole app (a signed session cookie, see{" "}
-          <code className="font-mono text-foreground">lib/auth.ts</code>), and there&apos;s
-          intentionally no multi-tenancy — one <code className="font-mono text-foreground">Profile</code> row
-          by design, not an oversight. That&apos;s the right scope for a single-tenant demo; a real
-          deployment adds per-account auth and data isolation without needing an architectural
-          rewrite.
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            Real accounts, real roles: scrypt-hashed passwords (<code className="font-mono text-foreground">lib/password.ts</code>,
+            Node&apos;s built-in crypto, no extra dependency), a signed session cookie carrying{" "}
+            <code className="font-mono text-foreground">{"{ userId, organizationId, role }"}</code> (<code className="font-mono text-foreground">lib/auth.ts</code>),
+            and three roles — <strong className="text-foreground">Owner</strong> (full access),{" "}
+            <strong className="text-foreground">Dispatcher</strong>, and{" "}
+            <strong className="text-foreground">Technician</strong> (own assigned jobs only).
+          </p>
+          <p>
+            Isolation is enforced where it actually matters — the query, not the page. A Prisma
+            Client Extension (<code className="font-mono text-foreground">lib/db.ts</code>{"'s"}{" "}
+            <code className="font-mono text-foreground">getScopedDb()</code>) injects the
+            session&apos;s organizationId into every read, write, and delete on every tenant
+            table automatically; application code never imports the raw Prisma client. A
+            technician&apos;s job list is additionally filtered to{" "}
+            <code className="font-mono text-foreground">assignedToId</code> in the query itself, and{" "}
+            <code className="font-mono text-foreground">lib/authz.ts</code>{"'s "}
+            <code className="font-mono text-foreground">assertCan()</code> blocks
+            Automations/Settings management for anyone who isn&apos;t an Owner, both in the UI
+            and — the part that actually matters — in the Server Action itself, so the check
+            can&apos;t be bypassed by calling the action directly.
+          </p>
         </CardContent>
       </Card>
 

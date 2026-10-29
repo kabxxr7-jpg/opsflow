@@ -1,6 +1,11 @@
 // Prisma schema for Opsflow — a field-service ops automation + AI reporting platform.
 // Data is seeded/simulated (mock connector), modeled on real-world field-service platforms.
 // Not a claim of integration with any specific named vendor.
+//
+// Multi-tenant: every tenant-scoped model carries a non-nullable, indexed organizationId.
+// Direct Prisma calls on these models are never made with the raw client in application code —
+// see lib/db.ts's getScopedDb()/getOrgDb(), which inject organizationId automatically. The raw
+// client is only ever touched by the scoping layer itself and by Organization/User management.
 
 datasource db {
   provider  = "postgresql"
@@ -12,22 +17,69 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model Customer {
+model Organization {
   id        String   @id @default(cuid())
   name      String
-  phone     String?
-  email     String?
-  address   String?
+  slug      String   @unique
   createdAt DateTime @default(now())
-  jobs      Job[]
+
+  users              User[]
+  customers          Customer[]
+  technicians        Technician[]
+  jobs               Job[]
+  tickets            Ticket[]
+  automationRules    AutomationRule[]
+  automationRuns     AutomationRun[]
+  webhookConfigs     WebhookConfig[]
+  webhookDeliveries  WebhookDelivery[]
+  dailyBriefings     DailyBriefing[]
+}
+
+enum UserRole {
+  OWNER
+  DISPATCHER
+  TECHNICIAN
+}
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String       @unique
+  passwordHash   String
+  name           String
+  role           UserRole
+  createdAt      DateTime     @default(now())
+
+  assignedJobs Job[] @relation("JobAssignee")
+
+  @@index([organizationId])
+}
+
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  phone          String?
+  email          String?
+  address        String?
+  createdAt      DateTime     @default(now())
+  jobs           Job[]
+
+  @@index([organizationId])
 }
 
 model Technician {
-  id        String   @id @default(cuid())
-  name      String
-  skills    String[] @default([])
-  createdAt DateTime @default(now())
-  jobs      Job[]
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  skills         String[]     @default([])
+  createdAt      DateTime     @default(now())
+  jobs           Job[]
+
+  @@index([organizationId])
 }
 
 enum JobStatus {
@@ -38,26 +90,35 @@ enum JobStatus {
 }
 
 model Job {
-  id           String      @id @default(cuid())
-  customerId   String
-  customer     Customer    @relation(fields: [customerId], references: [id])
-  technicianId String?
-  technician   Technician? @relation(fields: [technicianId], references: [id])
-  jobType      String
-  status       JobStatus   @default(SCHEDULED)
-  scheduledAt  DateTime?
-  completedAt  DateTime?
-  revenue      Decimal?    @db.Decimal(10, 2)
-  notes        String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id])
+  technicianId   String?
+  technician     Technician?  @relation(fields: [technicianId], references: [id])
+  // The User (role TECHNICIAN) who may view/update this job's status. Distinct from
+  // `technician` (the simulated field-service crew member record shown in the UI) — this is
+  // the auth-layer scoping field, kept separate on purpose so the demo-data "Technician" roster
+  // doesn't have to line up 1:1 with real login accounts.
+  assignedToId   String?
+  assignedTo     User?        @relation("JobAssignee", fields: [assignedToId], references: [id])
+  jobType        String
+  status         JobStatus    @default(SCHEDULED)
+  scheduledAt    DateTime?
+  completedAt    DateTime?
+  revenue        Decimal?     @db.Decimal(10, 2)
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   tickets           Ticket[]
   automationRuns    AutomationRun[]
   webhookDeliveries WebhookDelivery[]
 
-  @@index([status])
+  @@index([organizationId, status])
   @@index([customerId])
+  @@index([assignedToId])
 }
 
 enum TicketPriority {
@@ -68,12 +129,14 @@ enum TicketPriority {
 }
 
 model Ticket {
-  id        String   @id @default(cuid())
-  jobId     String?
-  job       Job?     @relation(fields: [jobId], references: [id])
-  rawText   String
-  source    String
-  createdAt DateTime @default(now())
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  jobId          String?
+  job            Job?         @relation(fields: [jobId], references: [id])
+  rawText        String
+  source         String
+  createdAt      DateTime     @default(now())
 
   // AI-extracted fields, Zod-validated before being persisted here
   classification String?
@@ -87,21 +150,25 @@ model Ticket {
   // garbled, a different failure mode than the AI being unsure how to classify clear text.
   ocrConfidence Float?
 
-  @@index([classification])
+  @@index([organizationId, classification])
   @@index([jobId])
 }
 
 model AutomationRule {
-  id        String   @id @default(cuid())
-  name      String
-  isActive  Boolean  @default(true)
-  trigger   Json
-  filters   Json?
-  actions   Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  isActive       Boolean      @default(true)
+  trigger        Json
+  filters        Json?
+  actions        Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   runs AutomationRun[]
+
+  @@index([organizationId])
 }
 
 enum RunStatus {
@@ -111,33 +178,41 @@ enum RunStatus {
 }
 
 model AutomationRun {
-  id        String         @id @default(cuid())
-  ruleId    String
-  rule      AutomationRule @relation(fields: [ruleId], references: [id])
-  jobId     String?
-  job       Job?           @relation(fields: [jobId], references: [id])
-  status    RunStatus
-  log       String?
-  createdAt DateTime       @default(now())
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ruleId         String
+  rule           AutomationRule @relation(fields: [ruleId], references: [id])
+  jobId          String?
+  job            Job?           @relation(fields: [jobId], references: [id])
+  status         RunStatus
+  log            String?
+  createdAt      DateTime       @default(now())
 
-  @@index([ruleId])
+  @@index([organizationId, ruleId])
   @@index([jobId])
 }
 
 model WebhookConfig {
-  id         String      @id @default(cuid())
-  targetUrl  String
-  secret     String
-  isActive   Boolean     @default(true)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  targetUrl      String
+  secret         String
+  isActive       Boolean      @default(true)
   // Job statuses that fire this webhook, e.g. [COMPLETED] fires only when a job completes.
-  triggerOn  JobStatus[] @default([])
-  createdAt  DateTime    @default(now())
+  triggerOn      JobStatus[]  @default([])
+  createdAt      DateTime     @default(now())
 
   deliveries WebhookDelivery[]
+
+  @@index([organizationId])
 }
 
 model WebhookDelivery {
   id              String        @id @default(cuid())
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   webhookConfigId String
   webhookConfig   WebhookConfig @relation(fields: [webhookConfigId], references: [id])
   jobId           String?
@@ -153,20 +228,18 @@ model WebhookDelivery {
   nextRetryAt     DateTime?
   createdAt       DateTime      @default(now())
 
-  @@index([success, nextRetryAt])
+  @@index([organizationId, success, nextRetryAt])
   @@index([jobId])
 }
 
 model DailyBriefing {
-  id         String   @id @default(cuid())
-  date       DateTime @default(now())
-  summary    String
-  highlights Json
-  createdAt  DateTime @default(now())
-}
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  date           DateTime     @default(now())
+  summary        String
+  highlights     Json
+  createdAt      DateTime     @default(now())
 
-// Single-user profile, same pattern as project 1: no multi-tenancy, this app has exactly one row.
-model Profile {
-  id        String   @id @default(cuid())
-  updatedAt DateTime @updatedAt
+  @@index([organizationId])
 }

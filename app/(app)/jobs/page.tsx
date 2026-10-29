@@ -1,5 +1,6 @@
 import { Briefcase } from "lucide-react";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { JobStatusSelect } from "@/components/job-status-select";
 import { formatDate, cn } from "@/lib/utils";
@@ -62,7 +63,15 @@ function TechAvatar({ name }: { name: string | null | undefined }) {
 }
 
 export default async function JobsPage() {
+  const session = await getSession();
+  if (!session) return null;
+  const db = await getScopedDb();
+
+  // Technicians only ever see jobs assigned to them — owners/dispatchers see everything in the
+  // org. This filter is in addition to (not instead of) the org scope getScopedDb() already
+  // applies; a technician from a different org couldn't reach this far regardless.
   const jobs = await db.job.findMany({
+    where: session.role === "TECHNICIAN" ? { assignedToId: session.userId } : undefined,
     include: { customer: true, technician: true },
     orderBy: { scheduledAt: "desc" },
   });
@@ -75,7 +84,9 @@ export default async function JobsPage() {
           Jobs
         </h1>
         <p className="text-sm text-muted-foreground">
-          Simulated field-service jobs, seeded for this demo.
+          {session.role === "TECHNICIAN"
+            ? "Jobs assigned to you."
+            : "Simulated field-service jobs, seeded for this demo."}
         </p>
       </div>
 

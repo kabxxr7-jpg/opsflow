@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/sidebar";
+import { getSession } from "@/lib/auth";
 
 // All routes under this layout read the session cookie (via proxy.ts) and hit the DB directly.
 // Cache Components' instant-navigation validation flags that as un-prerenderable, correctly, since
@@ -6,10 +7,12 @@ import { Sidebar } from "@/components/sidebar";
 // restructuring every page behind Suspense boundaries for a demo app that doesn't need that.
 export const instant = false;
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const session = await getSession();
+
   return (
     <div className="flex min-h-screen bg-muted/20 md:flex-row flex-col">
-      <Sidebar />
+      <Sidebar role={session?.role ?? null} />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 pb-24 md:px-8 md:pb-8">{children}</main>
     </div>
   );

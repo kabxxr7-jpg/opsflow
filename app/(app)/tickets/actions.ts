@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
 import { runAutomations } from "@/lib/automations";
 import { classifyTicket, AIError } from "@/lib/ai";
 
@@ -20,15 +20,17 @@ export async function createTicket(formData: FormData) {
     return { error: "Ticket text is required." };
   }
 
+  const db = await getScopedDb();
   const ticket = await db.ticket.create({
     data: {
       rawText,
       source,
       jobId: jobId || null,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
     },
   });
 
-  await runAutomations({ type: "ticket.created", ticket });
+  await runAutomations(db, { type: "ticket.created", ticket });
   revalidateTickets();
 
   // Classification happens after the ticket already exists and the creation-time automation
@@ -39,6 +41,7 @@ export async function createTicket(formData: FormData) {
 }
 
 export async function classifyTicketById(ticketId: string): Promise<{ error: string | null }> {
+  const db = await getScopedDb();
   const ticket = await db.ticket.findUnique({ where: { id: ticketId } });
   if (!ticket) {
     return { error: "Ticket not found." };
@@ -59,7 +62,7 @@ export async function classifyTicketById(ticketId: string): Promise<{ error: str
 
     // Re-evaluate ticket.created automations now that the ticket has real priority data —
     // the "flag urgent tickets" rule can only match once classification has actually run.
-    await runAutomations({ type: "ticket.created", ticket: updated });
+    await runAutomations(db, { type: "ticket.created", ticket: updated });
 
     revalidateTickets();
     return { error: null };

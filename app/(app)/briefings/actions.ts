@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getScopedDb } from "@/lib/db";
 import { generateDailyBriefing, AIError } from "@/lib/ai";
 
 export async function createDailyBriefing(): Promise<{ error: string | null }> {
   try {
-    await generateDailyBriefing();
+    const db = await getScopedDb();
+    await generateDailyBriefing(db);
     revalidatePath("/briefings");
     return { error: null };
   } catch (err) {

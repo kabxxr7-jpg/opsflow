@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { getScopedDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { assertCan } from "@/lib/authz";
 
 export type RuleTriggerInput = {
   type: "job.status_changed" | "ticket.created";
@@ -32,7 +34,15 @@ function revalidateAutomations() {
   revalidatePath("/dashboard");
 }
 
+async function requireOwner() {
+  const session = await getSession();
+  if (!session) throw new Error("No active session.");
+  assertCan(session, "manage:automations");
+  return getScopedDb();
+}
+
 export async function createRule(input: RuleInput) {
+  const db = await requireOwner();
   await db.automationRule.create({
     data: {
       name: input.name,
@@ -40,12 +50,14 @@ export async function createRule(input: RuleInput) {
       trigger: input.trigger,
       filters: input.filters,
       actions: input.actions,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
     },
   });
   revalidateAutomations();
 }
 
 export async function updateRule(id: string, input: RuleInput) {
+  const db = await requireOwner();
   await db.automationRule.update({
     where: { id },
     data: {
@@ -60,11 +72,13 @@ export async function updateRule(id: string, input: RuleInput) {
 }
 
 export async function deleteRule(id: string) {
+  const db = await requireOwner();
   await db.automationRule.delete({ where: { id } });
   revalidateAutomations();
 }
 
 export async function toggleRule(id: string, isActive: boolean) {
+  const db = await requireOwner();
   await db.automationRule.update({ where: { id }, data: { isActive } });
   revalidateAutomations();
 }

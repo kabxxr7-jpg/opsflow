@@ -1,7 +1,7 @@
 import { GoogleGenAI, ApiError } from "@google/genai";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { db } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db";
 
 const globalForGemini = globalThis as unknown as { gemini: GoogleGenAI | undefined };
 
@@ -192,7 +192,7 @@ function buildBriefingPrompt(
  * Reads today's tickets and job stats, asks Gemini for a narrative summary plus cited
  * highlights, validates the result, and persists it as a DailyBriefing row.
  */
-export async function generateDailyBriefing(): Promise<DailyBriefingResult> {
+export async function generateDailyBriefing(db: ScopedDb): Promise<DailyBriefingResult> {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
@@ -267,6 +267,7 @@ export async function generateDailyBriefing(): Promise<DailyBriefingResult> {
     data: {
       summary: grounded.summary,
       highlights: grounded.highlights,
+      organizationId: "", // overwritten unconditionally by the org-scope extension (lib/db.ts)
     },
   });
 
