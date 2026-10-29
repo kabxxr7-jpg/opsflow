@@ -249,7 +249,7 @@ export function RuleFormDialog({ mode, ruleId, initial, trigger }: Props) {
               const numeric = NUMERIC_FIELDS.includes(filter.field);
               const opItems = numeric ? OP_SYMBOL : { eq: OP_SYMBOL.eq };
               return (
-                <div key={index} className="flex items-center gap-2">
+                <div key={index} className="flex flex-wrap items-center gap-2">
                   <Select
                     items={fieldItems}
                     value={filter.field}
@@ -290,7 +290,7 @@ export function RuleFormDialog({ mode, ruleId, initial, trigger }: Props) {
                     </SelectContent>
                   </Select>
                   <Input
-                    className="min-w-0 flex-1"
+                    className="min-w-[7rem] flex-1"
                     value={filter.value}
                     onChange={(e) => updateFilter(index, { value: e.target.value })}
                     placeholder={numeric ? "e.g. 500" : "e.g. URGENT"}
@@ -340,16 +340,19 @@ export function RuleFormDialog({ mode, ruleId, initial, trigger }: Props) {
                     <SelectItem value="webhook">Webhook</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input
-                  className="min-w-0 flex-1"
-                  value={action.type === "webhook" ? "" : (action.value ?? "")}
-                  onChange={(e) => updateAction(index, { value: e.target.value })}
-                  placeholder={action.type === "tag" ? "tag value" : "sends to your active webhook endpoints"}
-                  aria-label={`Action ${index + 1} ${action.type === "tag" ? "tag value" : "details"}`}
-                  disabled={action.type === "webhook"}
-                  maxLength={LIMITS.tagValue}
-                  autoComplete="off"
-                />
+                {action.type === "webhook" ? (
+                  <p className="min-w-0 flex-1 text-sm text-muted-foreground">Sends to your active webhook endpoints</p>
+                ) : (
+                  <Input
+                    className="min-w-0 flex-1"
+                    value={action.value ?? ""}
+                    onChange={(e) => updateAction(index, { value: e.target.value })}
+                    placeholder="tag value"
+                    aria-label={`Action ${index + 1} tag value`}
+                    maxLength={LIMITS.tagValue}
+                    autoComplete="off"
+                  />
+                )}
                 <Button
                   type="button"
                   variant="ghost"
