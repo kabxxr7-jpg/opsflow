@@ -6,7 +6,7 @@
 A field-service ops automation and AI-reporting platform, built to demonstrate six specific
 skills together in one cohesive app rather than six shallow demos: production-grade multi-tenant
 auth with row-level isolation, a trigger/filter/action automation engine, AI classification with
-hallucination safeguards, signed two-way webhooks, an importable n8n workflow file (not yet run inside n8n), and an
+hallucination safeguards, signed two-way webhooks, an importable n8n workflow file (run in n8n Cloud on 2026-10-30), and an
 OCR-to-LLM document intake pipeline.
 
 All data is seeded/simulated, there's no real ServiceTitan, GoHighLevel, or other field-service
@@ -88,7 +88,7 @@ signatures instead (see `proxy.ts`).
   proves "I can design a trigger/filter/action data model and execution engine." Several real job
   postings this was built to answer want literal n8n experience, a different, specific claim that
   an in-app simulation doesn't honestly support. `integrations/n8n/` is an importable
-  workflow (hand-written, not yet run inside n8n) that calls this app's own API.
+  workflow (hand-written; run in n8n Cloud on 2026-10-30) that calls this app's own API.
 
 ## Multi-tenant auth: real isolation, not a login screen bolted on top
 
@@ -241,7 +241,7 @@ sign → deliver → verify loop can be demonstrated end to end: it recomputes t
 constant time, enforces the 5-minute replay window, and answers 401 to anything that doesn't
 verify (`tests/test-echo.test.ts` covers a forged signature, a tampered body and a replay).
 
-## The n8n workflow: a hand-written artifact, not yet run in n8n
+## The n8n workflow: hand-written, and run in n8n Cloud
 
 `integrations/n8n/ticket-intake-workflow.json` is an importable n8n workflow file: a webhook
 trigger, a validation step, a signed call to this app's classify endpoint, a confidence-based
@@ -252,9 +252,10 @@ callback that creates the ticket. Full node-by-node writeup in `integrations/n8n
 Every node type and parameter shape in that file was checked against n8n's own source repository,
 not written from memory. What's genuinely verified: the JSON is correctly structured, the
 JavaScript in its Code nodes is syntax-valid, and the exact HMAC signing logic those nodes run was
-extracted and tested against this app's real, live endpoint. What's not independently verified:
-the workflow running inside an actual n8n instance end to end, that needs a real n8n account to
-confirm.
+extracted and tested against this app's real, live endpoint. On 2026-10-30 it was also executed in an
+n8n Cloud trial, manual mode, through both branches (a confident message created a ticket; a vague
+one was flagged for manual review). What's not verified: the activated production webhook, runs at
+any volume, and classification quality beyond those examples.
 
 ## Document intake: OCR → the same AI pipeline
 
@@ -274,7 +275,7 @@ request-size limit.
 |---|---|---|
 | Multi-tenant auth, Prisma Client Extension for automatic org-scoping, role-based authorization | "Multi-user/multi-tenant SaaS," "role-based access control," security-conscious client work | `lib/db.ts`, `lib/authz.ts`, `lib/auth.ts` |
 | Automation rule engine + run log | "Zapier/ServiceTitan automation," general workflow-automation asks | `/automations`, `lib/automations.ts` |
-| An importable n8n workflow file (hand-written, not yet run in n8n) calling this app's own API | "n8n Developer," "n8n AI Agent" postings | `integrations/n8n/` |
+| An importable n8n workflow file (hand-written; run in n8n Cloud on 2026-10-30) calling this app's own API | "n8n Developer," "n8n AI Agent" postings | `integrations/n8n/` |
 | Gemini structured extraction, grounded confidence, cited daily briefings | "AI/OpenAI integration," "daily management briefings from transcripts," hallucination-safeguard asks | `lib/ai.ts` |
 | OCR intake feeding the same AI pipeline, two confidence scores, flagged for review | "OCR + LLM extraction + flag low-confidence for human review" (document/image ingestion postings) | `/intake`, `lib/ocr.ts` |
 | HMAC-signed, retried, logged webhooks, both directions | "REST APIs," "webhooks, code steps, filters" | `lib/webhooks.ts`, `app/api/integrations/` |
